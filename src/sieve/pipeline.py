@@ -1,0 +1,256 @@
+"""
+sieve/pipeline.py
+
+Main orchestrator. Ties together:
+  discovery → (optional: quality scoring) → acquisition
+  → extraction → deduplication → export
+
+When engineered_only=True, discovery runs in two phases:
+  Phase 1: collect all candidate repos + their quality metrics
+  Phase 2: compute population-level Q1 thresholds, filter, then clone
+
+When engineered_only=False, repos are processed as they are discovered
+(streaming, lower memory footprint).
+"""
+
+import logging
+import shutil
+import subprocess
+import tempfile
+import time
+from dataclasses import asdict
+from pathlib import Path
+from typing import Callable, Optional
+
+from sieve.config import SIEVEConfig
+from sieve.core.discovery import discover_repos, RepoMetadata
+from sieve.core.detection import detect_test_suite
+from sieve.core.extraction import extract_from_repo, FunctionRecord, ClassRecord
+from sieve.core.deduplication import deduplicate
+from sieve.core.export import export_dataset
+from sieve.core.quality import collect_metrics, apply_filters, RepoQualityMetrics
+
+logger = logging.getLogger(__name__)
+
+
+def _clone_repo(repo_full_name: str, target_dir: str) -> bool:
+    """Shallow clone a GitHub repo. Returns True on success."""
+    url = f"https://github.com/{repo_full_name}.git"
+    result = subprocess.run(
+        ["git", "clone", "--depth", "1", url, target_dir],
+        capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode != 0:
+        logger.warning(f"git clone failed for {repo_full_name}: {result.stderr.strip()}")
+        return False
+    return True
+
+
+def _process_repo(
+    repo_meta: RepoMetadata,
+    config: SIEVEConfig,
+    quality_metrics: Optional[RepoQualityMetrics],
+) -> tuple[list[FunctionRecord], list[ClassRecord], Optional[dict]]:
+    """
+    Clone, detect, and extract a single repo.
+    Returns (functions, classes, metadata_dict) or ([], [], None) on failure.
+    """
+    repo_name = repo_meta.full_name
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        clone_path = str(Path(tmpdir) / "repo")
+
+        if not _clone_repo(repo_name, clone_path):
+            return [], [], None
+
+        # Test suite detection
+        test_report = detect_test_suite(clone_path, config.language)
+        if config.require_tests and not test_report.is_present:
+            logger.info(f"  Skipping {repo_name}: no test suite detected")
+            return [], [], None
+
+        # Extraction
+        funcs, classes = extract_from_repo(
+            repo_path=clone_path,
+            language=config.language,
+            repo_name=repo_name,
+            granularities=config.granularity,
+        )
+
+        # Build metadata dict
+        meta_dict = {
+            "full_name": repo_meta.full_name,
+            "url": repo_meta.url,
+            "stars": repo_meta.stars,
+            "contributors": repo_meta.contributors,
+            "last_commit_date": repo_meta.last_commit_date,
+            "default_branch": repo_meta.default_branch,
+            "license_spdx": repo_meta.license_spdx,
+            "language": repo_meta.language,
+            "collected_at": repo_meta.collected_at,
+            "topics": repo_meta.topics,
+            "test_suite": test_report.to_dict(),
+        }
+
+        if quality_metrics:
+            meta_dict["quality"] = {
+                "pull_request_count": quality_metrics.pull_request_count,
+                "issue_count": quality_metrics.issue_count,
+                "loc": quality_metrics.loc,
+                "comment_lines": quality_metrics.comment_lines,
+                "code_ratio": quality_metrics.code_ratio,
+                "release_count": quality_metrics.release_count,
+                "passes_engineered_filter": quality_metrics.passes_all,
+            }
+
+        return funcs, classes, meta_dict
+
+
+def run_pipeline(
+    config: SIEVEConfig,
+    progress_callback: Optional[Callable[[str, int, int], None]] = None,
+) -> dict:
+    """
+    Execute the full SIEVE pipeline.
+
+    Args:
+        config: SIEVEConfig with all parameters set
+        progress_callback: Optional callable(message, current, total)
+
+    Returns:
+        dict with output paths and summary statistics
+    """
+    def _progress(msg: str, current: int = 0, total: int = 0):
+        logger.info(msg)
+        if progress_callback:
+            progress_callback(msg, current, total)
+
+    all_functions: list[FunctionRecord] = []
+    all_classes: list[ClassRecord] = []
+    repo_metadata_list: list[dict] = []
+    failed_repos: list[str] = []
+
+    # ── Phase 1: Discovery ────────────────────────────────────────────────────
+
+    _progress("Starting repo discovery...")
+
+    all_discovered: list[RepoMetadata] = list(discover_repos(
+        language=config.language,
+        cutoff_date=config.cutoff_date,
+        min_stars=config.min_stars,
+        min_contributors=config.min_contributors,
+        max_repos=config.max_repos,
+        github_token=config.github_token,
+    ))
+
+    total_discovered = len(all_discovered)
+    _progress(f"Discovered {total_discovered} candidate repositories.")
+
+    # ── Phase 2 (conditional): Engineered project filtering ───────────────────
+
+    if config.engineered_only:
+        _progress("Engineered project filter enabled — collecting quality metrics...")
+
+        quality_map: dict[str, RepoQualityMetrics] = {}
+        for idx, repo_meta in enumerate(all_discovered):
+            _progress(
+                f"  Quality metrics [{idx+1}/{total_discovered}]: {repo_meta.full_name}",
+                idx + 1, total_discovered,
+            )
+            metrics = collect_metrics(
+                repo_full_name=repo_meta.full_name,
+                license_spdx=repo_meta.license_spdx,
+                contributor_count=repo_meta.contributors,
+                repo_path=None,   # No clone yet — LOC will be 0 at this stage
+                github_token=config.github_token,
+            )
+            quality_map[repo_meta.full_name] = metrics
+            time.sleep(0.3)
+
+        filtered_metrics = apply_filters(list(quality_map.values()))
+        passing_names = {m.full_name for m in filtered_metrics if m.passes_all}
+
+        repos_to_process = [r for r in all_discovered if r.full_name in passing_names]
+        _progress(
+            f"Engineered filter: {total_discovered} → {len(repos_to_process)} repos passed."
+        )
+    else:
+        repos_to_process = all_discovered
+        quality_map = {}
+
+    # ── Phase 3: Clone → Detect → Extract ────────────────────────────────────
+
+    total = len(repos_to_process)
+    _progress(f"Beginning extraction on {total} repositories.", 0, total)
+
+    for idx, repo_meta in enumerate(repos_to_process):
+        repo_name = repo_meta.full_name
+        _progress(f"[{idx+1}/{total}] Processing {repo_name}", idx + 1, total)
+
+        qm = quality_map.get(repo_name)
+        funcs, classes, meta_dict = _process_repo(repo_meta, config, qm)
+
+        if meta_dict is None:
+            failed_repos.append(repo_name)
+            continue
+
+        _progress(
+            f"  {repo_name}: {len(funcs)} functions, {len(classes)} classes",
+            idx + 1, total,
+        )
+
+        all_functions.extend(funcs)
+        all_classes.extend(classes)
+        repo_metadata_list.append(meta_dict)
+        time.sleep(0.2)
+
+    # ── Phase 4: Deduplication ────────────────────────────────────────────────
+
+    if config.deduplicate:
+        _progress(f"Deduplicating (threshold={config.dedup_threshold})...")
+        all_functions = deduplicate(all_functions, threshold=config.dedup_threshold)
+        all_classes   = deduplicate(all_classes,   threshold=config.dedup_threshold)
+
+    # ── Phase 5: LLM score annotation (future) ───────────────────────────────
+
+    if config.annotate_llm_score:
+        _progress(
+            "LLM score annotation requested — classifier not yet built. "
+            "Scores will remain null. See sieve/models/ when ready."
+        )
+        # Placeholder — llm_score fields remain None on all records.
+        # When the classifier is ready:
+        #   from sieve.models.classifier import LLMCodeClassifier
+        #   clf = LLMCodeClassifier.load("sieve/models/llm_classifier.joblib")
+        #   for record in all_functions + all_classes:
+        #       record.llm_score = clf.score(record.source_code)
+
+    # ── Phase 6: Export ───────────────────────────────────────────────────────
+
+    _progress(
+        f"Extraction complete — {len(all_functions)} functions, "
+        f"{len(all_classes)} classes. Exporting..."
+    )
+
+    output_paths = export_dataset(
+        functions=all_functions,
+        classes=all_classes,
+        output_dir=config.output_dir,
+        export_format=config.export_format,
+        config=config.model_dump(),
+        repo_metadata_list=repo_metadata_list,
+    )
+
+    summary = {
+        "total_repos_discovered": total_discovered,
+        "total_repos_after_quality_filter": len(repos_to_process),
+        "total_repos_processed": len(repo_metadata_list),
+        "total_repos_failed": len(failed_repos),
+        "total_functions": len(all_functions),
+        "total_classes": len(all_classes),
+        "failed_repos": failed_repos,
+        "output_paths": output_paths,
+    }
+
+    _progress("Pipeline complete.", total, total)
+    return summary
