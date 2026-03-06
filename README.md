@@ -13,23 +13,6 @@ Static benchmarks like HumanEval and CodeSearchNet have well-known contamination
 
 ## Installation
 
-### Prerequisites
-
-**cloc** (Count Lines of Code) is highly recommended. SIEVE uses it for accurate LOC and comment line counting when the Engineered Projects filter is enabled. Without it, SIEVE falls back to an AST-based counter (accurate, but slower on large repos).
-
-| Platform | Command |
-|---|---|
-| macOS | `brew install cloc` |
-| Ubuntu / Debian | `sudo apt install cloc` |
-| Windows (Chocolatey) | `choco install cloc` |
-| Windows (winget) | `winget install AlDanial.Cloc` |
-| pip (cross-platform) | `pip install cloc` |
-| Manual | [github.com/AlDanial/cloc/releases](https://github.com/AlDanial/cloc/releases) |
-
-Verify installation: `cloc --version`
-
-### SIEVE
-
 ```bash
 git clone https://github.com/your-org/sieve.git
 cd sieve
