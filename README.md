@@ -15,6 +15,8 @@ Static benchmarks like HumanEval and CodeSearchNet have well-known contamination
 
 ### Prerequisites
 
+**Python 3.11+** is required. Check your version with `python --version`.
+
 **cloc** (Count Lines of Code) is highly recommended. SIEVE uses it for accurate LOC and comment line counting when the Engineered Projects filter is enabled. Without it, SIEVE falls back to an AST-based counter (accurate, but slower on large repos).
 
 | Platform | Command |
@@ -28,24 +30,48 @@ Static benchmarks like HumanEval and CodeSearchNet have well-known contamination
 
 Verify installation: `cloc --version`
 
-### SIEVE
+### Setup
 
+**1. Clone the repository**
 ```bash
 git clone https://github.com/your-org/sieve.git
 cd sieve
+```
+
+**2. Create and activate a virtual environment**
+```bash
+# macOS / Linux
+python -m venv .venv
+source .venv/bin/activate
+
+# Windows
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+You should see `(.venv)` at the start of your terminal prompt confirming the environment is active. All subsequent commands run inside this isolated environment — your system Python is untouched.
+
+**3. Install SIEVE and its dependencies**
+```bash
 pip install -e .
 ```
 
-A GitHub Personal Access Token is strongly recommended (set as `GITHUB_TOKEN` or enter it in the UI). Without it, the GitHub API rate limit is 10 requests/minute.
+**4. Set up your GitHub token**
+```bash
+cp .env.example .env
+```
+Open `.env` and replace `your_github_pat_here` with your GitHub Personal Access Token. Generate one at [github.com/settings/tokens](https://github.com/settings/tokens) — only the `public_repo` scope is needed. Without a token, the GitHub API rate limit is 60 requests/hour which is too low for any meaningful run.
 
 ---
 
 ## Usage
 
+> **Note:** Make sure your virtual environment is activated (`source .venv/bin/activate`) before running any of the commands below.
+
 ### Web Interface (Streamlit)
 
 ```bash
-streamlit run sieve/ui/app.py
+streamlit run src/sieve/ui/app.py
 ```
 
 Open `http://localhost:8501` in your browser, configure parameters in the sidebar, and click **Run SIEVE**.
@@ -82,6 +108,13 @@ config = SIEVEConfig(
 
 summary = run_pipeline(config)
 print(summary)
+```
+
+### Deactivating the virtual environment
+
+When you are done, deactivate the virtual environment with:
+```bash
+deactivate
 ```
 
 ---
