@@ -44,12 +44,13 @@ LANGUAGE_QUERY_MAP = {
 GITHUB_SEARCH_PAGE_SIZE = 100
 
 
-def _build_query(language: str, cutoff_date: date, min_stars: int) -> str:
-    pushed = cutoff_date.strftime("%Y-%m-%d")
+def _build_query(language: str, start_date: date, end_date: date, min_stars: int) -> str:
+    start = start_date.strftime("%Y-%m-%d")
+    end = end_date.strftime("%Y-%m-%d")
     lang = LANGUAGE_QUERY_MAP.get(language, language.lower())
     return (
         f"language:{lang} "
-        f"pushed:>={pushed} "
+        f"pushed:{start}..{end} "
         f"stars:>={min_stars} "
         f"fork:false "
         f"archived:false"
@@ -71,7 +72,8 @@ def _get_contributor_count(repo: Repository, token: str = None) -> int:
 
 def discover_repos(
     language: str,
-    cutoff_date: date,
+    start_date: date,
+    end_date: date,
     min_stars: int = 10,
     min_contributors: int = 1,
     max_repos: Optional[int] = None,
@@ -83,7 +85,8 @@ def discover_repos(
 
     Args:
         language: Programming language (e.g. "Python")
-        cutoff_date: Only include repos pushed after this date
+        start_date: Only include repos pushed on or after this date
+        end_date: Only include repos pushed on or before this date
         min_stars: Minimum star count
         min_contributors: Minimum unique contributor count
         max_repos: If set, stop after yielding this many repos
@@ -95,7 +98,7 @@ def discover_repos(
     from datetime import datetime, timezone
 
     g = Github(github_token, per_page=GITHUB_SEARCH_PAGE_SIZE) if github_token else Github(per_page=GITHUB_SEARCH_PAGE_SIZE)
-    query = _build_query(language, cutoff_date, min_stars)
+    query = _build_query(language, start_date, end_date, min_stars)
 
     logger.info(f"GitHub search query: {query}")
 

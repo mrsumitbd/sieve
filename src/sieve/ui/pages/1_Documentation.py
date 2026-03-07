@@ -1,0 +1,396 @@
+"""
+pages/1_📖_Documentation.py
+
+Documentation and FAQ page for SIEVE.
+Automatically discovered by Streamlit's multipage feature when placed in pages/.
+"""
+
+import streamlit as st
+
+st.set_page_config(
+    page_title="SIEVE — Documentation",
+    page_icon="📖",
+    layout="wide",
+)
+
+st.title("📖 SIEVE Documentation")
+st.caption("**S**oftware **I**ngestion & **E**xtraction for **V**erifiable **E**valuation")
+st.divider()
+
+# ─── Overview ─────────────────────────────────────────────────────────────────
+
+st.header("What is SIEVE?")
+st.markdown("""
+SIEVE is a parameterized GitHub corpus builder for software engineering research.
+It addresses a core validity threat in LLM-based code studies: **benchmark contamination**.
+When training data and evaluation data overlap, benchmark scores are inflated and results
+are not reproducible. SIEVE mitigates this by letting you construct evaluation corpora
+**on demand** from repositories whose last activity falls within a user-defined date window
+— making it straightforward to target a period after a model's training cutoff.
+
+SIEVE extracts two types of program units:
+- **Functions** — CodeSearchNet-style records with full source, signature, parameters, return type, and docstring.
+- **Classes** — OpenClassEval-style records with full source, skeleton, method list, and inheritance.
+
+Both record types include the import statements used within the extracted unit, enabling
+self-contained code snippets for prompting or evaluation.
+""")
+
+st.divider()
+
+# ─── Parameters ───────────────────────────────────────────────────────────────
+
+st.header("Parameter Reference")
+
+st.subheader("Date Range")
+st.markdown("""
+| Parameter | Description |
+|-----------|-------------|
+| **Start Date** | Only include repos with last commit on or after this date. Set this to just after a model's known training cutoff to avoid contamination. |
+| **End Date** | Only include repos with last commit on or before this date. Defaults to today. Together with Start Date, this defines the activity window. |
+
+The GitHub search query uses `pushed:START..END`, filtering on the last push date of the default branch.
+""")
+
+st.subheader("Repository Filters")
+st.markdown("""
+| Parameter | Description |
+|-----------|-------------|
+| **Min Stars** | Minimum GitHub star count. Higher values bias toward popular, well-maintained projects but reduce diversity. |
+| **Min Contributors** | Minimum unique contributor count. Helps exclude personal or toy projects. Note: bots are excluded from the count. |
+| **Max Repos** | Hard cap on the number of repos to process (0 = no cap). Applies during discovery, before cloning. |
+| **Max Functions** | Cap on total extracted functions *after deduplication*. When the corpus exceeds this, stratified sampling is applied (see below). |
+| **Max Classes** | Cap on total extracted classes *after deduplication*. Same stratified sampling applies. |
+""")
+
+st.subheader("Content Filters")
+st.markdown("""
+| Parameter | Description |
+|-----------|-------------|
+| **Granularity** | Choose to extract functions, classes, or both. |
+| **Require Test Suite** | Only include repos where a test suite is detected. Detection uses four signals: test directory names, test file naming patterns, test runner config files (e.g. `pytest.ini`), and CI workflow files. A test suite is considered present if ≥ 2 signals fire. |
+| **Engineered Projects Only** | Applies the Xiao et al. (2025) / Munaiah et al. (2017) filter — see section below. |
+""")
+
+st.subheader("Deduplication")
+st.markdown("""
+| Parameter | Description |
+|-----------|-------------|
+| **Deduplicate** | Enable MinHash LSH near-duplicate removal across all extracted records. |
+| **Similarity Threshold** | Jaccard similarity threshold for MinHash deduplication (0.0–1.0). Higher values are more conservative — only near-identical code is removed. Default: 0.8. |
+
+Deduplication tokenizes source code (stripping string literals and normalizing whitespace) before
+hashing, so superficial differences like renamed variables or changed comments do not prevent
+duplicate detection.
+""")
+
+st.divider()
+
+# ─── Stratified Sampling ──────────────────────────────────────────────────────
+
+st.header("Corpus Size Caps & Stratified Sampling")
+st.markdown("""
+When **Max Functions** or **Max Classes** is set and the extracted corpus exceeds that cap,
+SIEVE does not draw a simple random sample. Instead it uses **proportional stratified sampling**
+by repository:
+
+1. Records are grouped by source repository.
+2. Each repo's allocation is `cap × (repo_count / total_count)`.
+3. Integer parts are taken first; remainder slots are filled by the repos with the largest
+   fractional allocations (standard largest-remainder method).
+4. Within each repo's allocation, records are drawn uniformly at random without replacement.
+
+**Example:** cap = 20, corpus = TheAlgorithms (276 classes), system-design-primer (52 classes).
+Proportional allocation: TheAlgorithms gets 17, system-design-primer gets 3.
+
+**Important caveat:** Proportional allocation preserves the *natural* distribution of the corpus.
+If your corpus is dominated by one repository (e.g. a large algorithm collection), the sample
+will reflect that. If you need balanced representation across repos, use the **Engineered Projects**
+filter or set **Max Repos** to a small number of carefully chosen repositories.
+""")
+
+st.divider()
+
+# ─── Engineered Projects ──────────────────────────────────────────────────────
+
+st.header("Engineered Projects Filter")
+st.markdown("""
+Enabling **Engineered Projects Only** applies a three-stage quality filter based on
+[Xiao et al. (2025)](https://arxiv.org/abs/2507.10422) and the REAPER methodology
+([Munaiah et al., 2017](https://doi.org/10.1007/s10664-017-9512-6)):
+
+**Stage 1 — License exclusion.** Repos with non-software licenses are excluded:
+`CC-BY-4.0`, `CC0-1.0`, `CC-BY-SA-4.0`, `OFL-1.1`, and repos with no license.
+These are typically documentation, datasets, or font projects.
+
+**Stage 2 — Hard thresholds.** Repos with zero releases or fewer than 2 contributors
+are excluded unconditionally.
+
+**Stage 3 — Population-level Q1 filter.** Across all discovered repos, SIEVE computes
+the first quartile (Q1) for pull request count, issue count, and LOC, plus a 97% confidence
+interval on code ratio. Repos falling below Q1 on any dimension are excluded.
+
+This filter is the most reliable way to avoid documentation repos, "awesome lists", dataset
+repos, and other non-software projects that can otherwise dominate high-star searches.
+It requires a **two-pass discovery** (collect all candidates first, compute population
+statistics, then filter), which is slower but produces a significantly higher-quality corpus.
+
+**When to enable it:** Any time corpus quality matters more than speed. Strongly recommended
+for corpora intended for publication.
+""")
+
+with st.expander("Why do documentation repos appear in high-star searches?"):
+    st.markdown("""
+    GitHub's star count reflects popularity, not software content. Repos like
+    `awesome-python`, `free-programming-books`, and `public-apis` routinely rank in the
+    top 10 most-starred Python repos despite containing little or no executable code.
+    Without the engineered filter, these repos will be discovered, cloned, and processed —
+    yielding zero or near-zero extracted records while consuming API quota and clone time.
+
+    If you do not want to use the full engineered filter (it's slower due to the two-pass
+    discovery and per-repo metrics collection), a lighter alternative is to set a higher
+    **Min Stars** threshold in combination with a meaningful **Min Contributors** count,
+    then inspect the per-repo breakdown in the Dataset Statistics panel after a run.
+    Repos with 0 extracted functions *and* 0 extracted classes are a reliable signal of
+    non-software content.
+    """)
+
+st.divider()
+
+# ─── Record Types ─────────────────────────────────────────────────────────────
+
+st.header("Record Schema")
+
+tab_func, tab_class = st.tabs(["Function Record", "Class Record"])
+
+with tab_func:
+    st.markdown("""
+    | Field | Type | Description |
+    |-------|------|-------------|
+    | `repo` | str | Full repo name, e.g. `owner/repo` |
+    | `file_path` | str | Path relative to repo root |
+    | `language` | str | Programming language |
+    | `func_name` | str | Function name |
+    | `parameters` | list[str] | Parameter list as strings (includes type annotations) |
+    | `return_annotation` | str \\| null | Return type annotation if present |
+    | `docstring` | str \\| null | Docstring content, stripped of delimiters |
+    | `source_code` | str | Full function source, indentation-normalized |
+    | `signature` | str | `def` line + docstring + `pass` — no body |
+    | `used_imports` | list[str] | Import statements whose names appear in the function body |
+    | `start_line` | int | Start line in the original file (body only, excludes imports) |
+    | `end_line` | int | End line in the original file (body only, excludes imports) |
+    | `is_method` | bool | True if defined inside a class |
+    | `parent_class` | str \\| null | Enclosing class name if `is_method` is true |
+    | `decorators` | list[str] | Decorator strings (populated in future release) |
+    | `llm_score` | float \\| null | P(LLM-generated) — reserved for future classifier |
+    """)
+
+with tab_class:
+    st.markdown("""
+    | Field | Type | Description |
+    |-------|------|-------------|
+    | `repo` | str | Full repo name, e.g. `owner/repo` |
+    | `file_path` | str | Path relative to repo root |
+    | `language` | str | Programming language |
+    | `class_name` | str | Class name |
+    | `parent_classes` | list[str] | Base class names |
+    | `docstring` | str \\| null | Class-level docstring |
+    | `source_code` | str | Full class source, indentation-normalized |
+    | `skeleton` | str | Class signature + method signatures + docstrings + `pass` |
+    | `used_imports` | list[str] | Import statements whose names appear in the class body |
+    | `method_names` | list[str] | Names of all methods defined in the class |
+    | `method_count` | int | Number of methods |
+    | `has_constructor` | bool | True if `__init__` is defined |
+    | `decorators` | list[str] | Decorator strings (populated in future release) |
+    | `start_line` | int | Start line in the original file (body only, excludes imports) |
+    | `end_line` | int | End line in the original file (body only, excludes imports) |
+    | `llm_score` | float \\| null | P(LLM-generated) — reserved for future classifier |
+    """)
+
+st.divider()
+
+# ─── Import Detection ─────────────────────────────────────────────────────────
+
+st.header("Import Detection")
+st.markdown("""
+SIEVE populates `used_imports` for every extracted record by statically analyzing the
+file's top-level import statements. The detection logic:
+
+1. All `import X`, `import X as Y`, `from X import A`, and `from X import A as B`
+   statements at module level are collected.
+2. For each import, the **names introduced into the module namespace** are identified
+   (e.g. `import numpy as np` → `np`; `from pathlib import Path` → `Path`).
+3. Each name is searched in the function or class source using a word-boundary regex
+   (`\\bname\\b`), preventing false positives like `os` matching inside `cosmos`.
+4. `from X import *` wildcard imports are always included.
+
+**Enabling imports in the Sample Viewer** prepends the detected import block above the
+source code or skeleton — useful for verifying that the record is self-contained.
+
+**Note:** This is static name-reference detection, not full data-flow analysis. It may
+include imports that are referenced in type annotations but not at runtime, and will miss
+imports used only via `getattr` or dynamic dispatch. For the purposes of LLM prompting
+or evaluation, this is generally sufficient.
+""")
+
+st.divider()
+
+# ─── Output Files ─────────────────────────────────────────────────────────────
+
+st.header("Output Files")
+st.markdown("""
+All output is written to the directory specified in **Output Directory**. Files produced:
+
+| File | Description |
+|------|-------------|
+| `functions.jsonl` | One JSON object per line, one per function record |
+| `classes.jsonl` | One JSON object per line, one per class record |
+| `functions.parquet` | Columnar format — list fields serialized as JSON strings |
+| `classes.parquet` | Columnar format — list fields serialized as JSON strings |
+| `manifest.json` | Run metadata: config snapshot, per-repo stats, summary counts, timestamps |
+
+JSONL and Parquet are written based on the **Export Format** setting. The manifest is always written.
+
+**Loading the data in Python:**
+```python
+import json
+from pathlib import Path
+
+functions = [json.loads(l) for l in Path("sieve_output/functions.jsonl").read_text().splitlines() if l]
+classes   = [json.loads(l) for l in Path("sieve_output/classes.jsonl").read_text().splitlines() if l]
+```
+
+Or with pandas / polars:
+```python
+import pandas as pd
+df = pd.read_json("sieve_output/functions.jsonl", lines=True)
+```
+""")
+
+st.divider()
+
+# ─── FAQ ──────────────────────────────────────────────────────────────────────
+
+st.header("FAQ")
+
+with st.expander("Why do some repos yield 0 functions and 0 classes?"):
+    st.markdown("""
+    These are almost always non-software repositories — documentation sites, curated lists
+    (e.g. `awesome-*`), dataset repos, or book projects. They may contain Python scripts
+    but often have no `.py` files with extractable function or class definitions.
+
+    **How to avoid this:** Enable the **Engineered Projects Only** filter, which uses
+    license type, release count, contributor count, pull request activity, and code ratio
+    to exclude non-software repos before cloning. This is the most robust solution but adds
+    processing time. A lighter alternative is to inspect the Dataset Statistics panel after
+    a run and adjust your filters accordingly.
+    """)
+
+with st.expander("Why are most of my records from one repository?"):
+    st.markdown("""
+    Without caps, the corpus reflects the natural size distribution of the repos — a large
+    algorithm collection like `TheAlgorithms/Python` can contribute thousands of records
+    while a smaller repo contributes tens.
+
+    When you set **Max Functions** or **Max Classes**, SIEVE applies stratified sampling
+    to preserve proportional representation. However, if the corpus is dominated by one
+    repo, even proportional sampling will allocate most slots to it — this is mathematically
+    correct but may not suit all research designs.
+
+    For balanced, equal-per-repo sampling, set a small **Max Repos** value and choose your
+    repos carefully, or use the **Engineered Projects** filter which tends to produce a more
+    diverse corpus by excluding non-software repos.
+    """)
+
+with st.expander("What does the skeleton look like for an Enum or dataclass with no methods?"):
+    st.markdown("""
+    Classes with no method definitions (e.g. `Enum` subclasses, simple dataclasses, constants
+    containers) get a skeleton with `pass` as the body:
+
+    ```python
+    class State(Enum):
+        pass
+    ```
+
+    This is valid Python and makes the skeleton usable as a prompt without modification.
+    The full source code in `source_code` still contains all the assignments and enum values.
+    """)
+
+with st.expander("What does 'indentation-normalized' mean?"):
+    st.markdown("""
+    Tree-sitter returns node text starting at the first token. For a top-level function,
+    this means 4-space body indentation as expected. For a method inside a class, the raw
+    text has 8-space body indentation (the absolute position in the file).
+
+    SIEVE normalizes this by measuring the minimum indentation of body lines and stripping
+    the excess, so all extracted code — whether top-level functions or deeply nested methods —
+    has a consistent 4-space body indent. Relative indentation within the body (nested loops,
+    conditionals, etc.) is preserved.
+    """)
+
+with st.expander("Why does the line number say 'body lines, excl. imports'?"):
+    st.markdown("""
+    `start_line` and `end_line` record the position of the function or class definition
+    within its source file. They do **not** account for import statements, which are at the
+    top of the file and may be prepended to the record in the Sample Viewer for display
+    purposes.
+
+    These line numbers are useful for locating the original code in the repository for
+    manual verification — navigate to `file_path` in the repo at `github.com/{repo}` and
+    go to line `start_line`.
+    """)
+
+with st.expander("What GitHub API rate limits should I expect?"):
+    st.markdown("""
+    Without a token: 10 requests/minute (search) and 60 requests/hour (REST).
+    This will be exhausted quickly for any non-trivial run.
+
+    With a Personal Access Token (PAT): 30 requests/minute (search) and 5,000 requests/hour
+    (REST). A PAT with no scopes (public repo access only) is sufficient — SIEVE only reads
+    public repository data.
+
+    SIEVE sleeps 0.5 seconds between contributor count fetches and 0.2 seconds between
+    per-repo processing to stay within limits. For large runs (50+ repos), expect the
+    discovery phase to take several minutes.
+
+    To create a PAT: GitHub → Settings → Developer settings → Personal access tokens →
+    Tokens (classic) → Generate new token → no scopes required → copy into the token field.
+    """)
+
+with st.expander("Which languages are supported?"):
+    st.markdown("""
+    Currently **Python only** for function and class extraction. The extraction pipeline
+    uses tree-sitter grammars and is designed to be extended — Java and JavaScript stubs
+    are in place in `extraction.py` but not yet implemented.
+
+    Discovery and repository filtering work for any of the three configured languages
+    (Python, Java, JavaScript), but extraction will return empty results for Java and
+    JavaScript until their extractors are implemented.
+    """)
+
+with st.expander("How is 'used imports' different from all imports in the file?"):
+    st.markdown("""
+    A file may import 20 modules, but a given function might only use 3 of them. SIEVE
+    filters the file-level imports down to only those whose introduced names appear as
+    whole tokens in the function or class source code.
+
+    For example, if a file has `import os`, `import re`, and `from pathlib import Path`,
+    but a function only uses `Path`, only `from pathlib import Path` will appear in
+    `used_imports` for that function.
+
+    This keeps snippets minimal and avoids cluttering prompts with irrelevant imports.
+    """)
+
+with st.expander("What is the LLM Score field?"):
+    st.markdown("""
+    `llm_score` is a reserved field for a future classifier that will estimate the
+    probability that a given function or class was written by an LLM rather than a human.
+    It is currently `null` for all records.
+
+    The planned classifier will be trained on the CodeProbe dataset using gradient-boosted
+    trees over 72 interpretable code features, with DeepSHAP for explainability. When
+    ready, it will be integrated via `sieve/models/classifier.py`.
+    """)
+
+st.divider()
+st.caption("SIEVE v0.1.0 · Built for SE research · [GitHub](https://github.com/your-org/sieve)")

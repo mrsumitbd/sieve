@@ -68,10 +68,16 @@ def write_manifest(
         },
         "repos": repo_metadata_list,
     }
+    def _default(obj):
+        """JSON serializer for types not handled by default."""
+        if hasattr(obj, "isoformat"):   # date, datetime
+            return obj.isoformat()
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
     manifest_path = output_dir / "manifest.json"
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2, ensure_ascii=False)
+        json.dump(manifest, f, indent=2, ensure_ascii=False, default=_default)
     logger.info(f"Manifest written → {manifest_path}")
 
 

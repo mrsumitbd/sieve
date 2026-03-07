@@ -25,12 +25,22 @@ class ExportFormat(str, Enum):
 class SIEVEConfig(BaseModel):
     # --- Core filters ---
     language: Language = Field(..., description="Target programming language")
-    cutoff_date: date = Field(..., description="Only include repos with last commit after this date")
+    start_date: date = Field(..., description="Only include repos with last commit on or after this date")
+    end_date: date = Field(..., description="Only include repos with last commit on or before this date")
+
+    @field_validator("end_date")
+    @classmethod
+    def end_after_start(cls, v, info):
+        if "start_date" in info.data and v < info.data["start_date"]:
+            raise ValueError("end_date must be on or after start_date")
+        return v
 
     # --- Repo quality filters ---
     min_stars: int = Field(default=10, ge=0, description="Minimum number of GitHub stars")
     min_contributors: int = Field(default=1, ge=1, description="Minimum number of unique contributors")
     max_repos: Optional[int] = Field(default=None, description="Cap on number of repos to process. None = no cap")
+    max_functions: Optional[int] = Field(default=None, ge=1, description="Cap on total functions after deduplication. None = no cap")
+    max_classes: Optional[int] = Field(default=None, ge=1, description="Cap on total classes after deduplication. None = no cap")
 
     # --- Content filters ---
     granularity: list[Granularity] = Field(

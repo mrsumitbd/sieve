@@ -136,7 +136,8 @@ def run_pipeline(
 
     all_discovered: list[RepoMetadata] = list(discover_repos(
         language=config.language,
-        cutoff_date=config.cutoff_date,
+        start_date=config.start_date,
+        end_date=config.end_date,
         min_stars=config.min_stars,
         min_contributors=config.min_contributors,
         max_repos=config.max_repos,
@@ -211,6 +212,60 @@ def run_pipeline(
         all_functions = deduplicate(all_functions, threshold=config.dedup_threshold)
         all_classes   = deduplicate(all_classes,   threshold=config.dedup_threshold)
 
+    # ── Phase 4b: Corpus size caps (stratified by repo) ──────────────────────
+
+    def _stratified_sample(records, cap: int, key: str = "repo") -> list:
+        """
+        Sample `cap` records from `records` with proportional allocation
+        across repos.  Any remainder is filled by sampling from repos with
+        the largest allocations, ensuring the total is exactly `cap`.
+        """
+        import math
+        from collections import defaultdict
+
+        by_repo: dict[str, list] = defaultdict(list)
+        for r in records:
+            by_repo[getattr(r, key)].append(r)
+
+        n_repos = len(by_repo)
+        total = len(records)
+        result = []
+        remainders = {}
+
+        for repo, items in by_repo.items():
+            exact = cap * len(items) / total
+            base = int(exact)
+            remainders[repo] = exact - base
+            import random
+            result.extend(random.sample(items, min(base, len(items))))
+
+        # Fill remainder slots from repos with highest fractional parts
+        shortfall = cap - len(result)
+        if shortfall > 0:
+            sorted_repos = sorted(remainders, key=lambda r: remainders[r], reverse=True)
+            already_taken = {r: sum(1 for x in result if getattr(x, key) == r) for r in by_repo}
+            for repo in sorted_repos[:shortfall]:
+                pool = [x for x in by_repo[repo] if x not in result]
+                if pool:
+                    import random
+                    result.append(random.choice(pool))
+
+        return result
+
+    if config.max_functions is not None and len(all_functions) > config.max_functions:
+        _progress(
+            f"Applying function cap: {len(all_functions)} → {config.max_functions} "
+            f"(stratified by repo)"
+        )
+        all_functions = _stratified_sample(all_functions, config.max_functions)
+
+    if config.max_classes is not None and len(all_classes) > config.max_classes:
+        _progress(
+            f"Applying class cap: {len(all_classes)} → {config.max_classes} "
+            f"(stratified by repo)"
+        )
+        all_classes = _stratified_sample(all_classes, config.max_classes)
+
     # ── Phase 5: LLM score annotation (future) ───────────────────────────────
 
     if config.annotate_llm_score:
@@ -237,7 +292,7 @@ def run_pipeline(
         classes=all_classes,
         output_dir=config.output_dir,
         export_format=config.export_format,
-        config=config.model_dump(),
+        config=config.model_dump(mode="json"),
         repo_metadata_list=repo_metadata_list,
     )
 
@@ -250,6 +305,21 @@ def run_pipeline(
         "total_classes": len(all_classes),
         "failed_repos": failed_repos,
         "output_paths": output_paths,
+        "output_dir": config.output_dir,
+        # Per-repo counts for charts
+        "repo_stats": [
+            {
+                "repo": m["full_name"],
+                "stars": m["stars"],
+                "contributors": m["contributors"],
+                "functions": sum(1 for f in all_functions if f.repo == m["full_name"]),
+                "classes": sum(1 for c in all_classes if c.repo == m["full_name"]),
+                "test_suite_present": m["test_suite"]["test_suite_present"],
+                "test_confidence": m["test_suite"]["confidence"],
+                "license": m.get("license_spdx") or "Unknown",
+            }
+            for m in repo_metadata_list
+        ],
     }
 
     _progress("Pipeline complete.", total, total)
