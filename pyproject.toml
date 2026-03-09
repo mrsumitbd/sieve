@@ -34,3 +34,6 @@ sieve = "sieve.cli:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["sieve*"]
+
+[tool.setuptools.package-data]
+"sieve.ui.demo_data" = ["*.jsonl", "*.json"]

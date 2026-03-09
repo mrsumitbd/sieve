@@ -1,0 +1,45 @@
+{
+  "generated_at": "2026-03-09T20:46:32.468635Z",
+  "description": "Bundled demo dataset for SIEVE \u2014 synthetic repos, real extraction.",
+  "repos": [
+    "sieve-demo/data-structures",
+    "sieve-demo/algorithms",
+    "sieve-demo/text-utils"
+  ],
+  "summary": {
+    "total_functions": 54,
+    "total_classes": 8
+  },
+  "repo_stats": [
+    {
+      "repo": "sieve-demo/data-structures",
+      "stars": 1240,
+      "contributors": 12,
+      "functions": 25,
+      "classes": 6,
+      "test_suite_present": true,
+      "test_confidence": "high",
+      "license": "MIT"
+    },
+    {
+      "repo": "sieve-demo/algorithms",
+      "stars": 890,
+      "contributors": 8,
+      "functions": 10,
+      "classes": 0,
+      "test_suite_present": true,
+      "test_confidence": "high",
+      "license": "MIT"
+    },
+    {
+      "repo": "sieve-demo/text-utils",
+      "stars": 430,
+      "contributors": 5,
+      "functions": 19,
+      "classes": 2,
+      "test_suite_present": true,
+      "test_confidence": "high",
+      "license": "Apache-2.0"
+    }
+  ]
+}

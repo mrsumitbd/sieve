@@ -20,6 +20,38 @@ from sieve.config import SIEVEConfig, Language, Granularity, ExportFormat
 from sieve.pipeline import run_pipeline
 from sieve.core.quality import check_cloc, CLOC_INSTALL_INSTRUCTIONS
 
+# ─── Demo dataset helpers ─────────────────────────────────────────────────────
+
+_DEMO_DIR = Path(__file__).parent / "demo_data"
+
+
+def load_demo_dataset() -> dict:
+    """
+    Load the bundled demo dataset and return a summary dict in the same
+    shape as run_pipeline() — so the Results section renders unchanged.
+    """
+    fn_path = _DEMO_DIR / "functions.jsonl"
+    cl_path = _DEMO_DIR / "classes.jsonl"
+    manifest = json.loads((_DEMO_DIR / "manifest.json").read_text())
+
+    return {
+        "total_repos_discovered": 3,
+        "total_repos_after_quality_filter": 3,
+        "total_repos_processed": 3,
+        "total_repos_failed": 0,
+        "total_functions": manifest["summary"]["total_functions"],
+        "total_classes": manifest["summary"]["total_classes"],
+        "failed_repos": [],
+        "output_paths": {
+            "functions_jsonl": str(fn_path),
+            "classes_jsonl": str(cl_path),
+            "manifest": str(_DEMO_DIR / "manifest.json"),
+        },
+        "output_dir": str(_DEMO_DIR),
+        "repo_stats": manifest["repo_stats"],
+        "_is_demo": True,
+    }
+
 
 # ─── Page Config ─────────────────────────────────────────────────────────────
 
@@ -154,6 +186,16 @@ with st.sidebar:
         use_container_width=True,
     )
 
+    st.divider()
+    demo_button = st.button(
+        "📦 Load Example Dataset",
+        use_container_width=True,
+        help=(
+            "Load a pre-built demo corpus (54 functions, 8 classes across "
+            "3 synthetic repositories). No GitHub token required."
+        ),
+    )
+
 
 # ─── Pipeline Execution ───────────────────────────────────────────────────────
 
@@ -204,6 +246,17 @@ if run_button:
                 st.error(str(e))
 
 
+# ─── Demo Dataset Load ────────────────────────────────────────────────────────
+
+if demo_button:
+    try:
+        st.session_state.summary = load_demo_dataset()
+        st.session_state.error = None
+        st.session_state.sample = None
+    except Exception as e:
+        st.error(f"Could not load demo dataset: {e}")
+
+
 # ─── Results ─────────────────────────────────────────────────────────────────
 
 if st.session_state.error and not st.session_state.summary:
@@ -212,6 +265,15 @@ if st.session_state.error and not st.session_state.summary:
 if st.session_state.summary:
     s = st.session_state.summary
     st.divider()
+
+    if s.get("_is_demo"):
+        st.info(
+            "**📦 Demo dataset loaded.** "
+            "Showing pre-built corpus from 3 synthetic repositories "
+            "(`sieve-demo/data-structures`, `sieve-demo/algorithms`, `sieve-demo/text-utils`). "
+            "Click **▶ Run SIEVE** with a GitHub token to build a real corpus.",
+            icon="ℹ️",
+        )
 
     # ── Summary Metrics ───────────────────────────────────────────────────────
 
@@ -425,6 +487,11 @@ else:
     2. Provide a GitHub Personal Access Token
     3. Click **▶ Run SIEVE** to start collection
     4. Results, statistics, and a sample viewer will appear here
+
+    — or —
+
+    Click **📦 Load Example Dataset** to explore a pre-built corpus instantly,
+    with no token required.
     """)
 
 with st.expander("📋 Current Configuration (JSON)"):
