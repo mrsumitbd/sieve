@@ -444,6 +444,484 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
     return functions, classes
 
 
+# ─── Java Extraction ─────────────────────────────────────────────────────────
+
+def _clean_block_comment(raw: str) -> Optional[str]:
+    """Strip /* */ or /** */ delimiters and leading ' * ' from each line."""
+    inner = re.sub(r"^/\*+", "", raw.strip())
+    inner = re.sub(r"\*+/$", "", inner).strip()
+    cleaned = "\n".join(re.sub(r"^\s*\*\s?", "", l) for l in inner.splitlines()).strip()
+    return cleaned or None
+
+def _java_preceding_comment(node, source_bytes: bytes) -> Optional[str]:
+    """
+    Return the cleaned text of the block_comment immediately preceding node,
+    or None if no such comment exists.  Java docstrings are /** ... */ siblings,
+    not children of the declaration node.
+    """
+    parent = node.parent
+    if not parent:
+        return None
+    siblings = list(parent.children)
+    idx = next((i for i, c in enumerate(siblings) if c == node), -1)
+    if idx > 0:
+        prev = siblings[idx - 1]
+        if prev.type == "block_comment":
+            raw = _node_text(prev, source_bytes)
+            return _clean_block_comment(raw)
+    return None
+
+
+def _java_method_signature(method_node, source_bytes: bytes) -> str:
+    """
+    Reconstruct Java method signature: everything up to (not including) the body block.
+    Returns e.g. 'public int search(List<T> list, T target)'.
+    Handles both method_declaration (body=block) and constructor_declaration (body=constructor_body).
+    """
+    parts = []
+    for child in method_node.children:
+        if child.type in ("block", "constructor_body"):
+            break
+        parts.append(_node_text(child, source_bytes))
+    return " ".join(parts).strip()
+
+
+def _build_java_skeleton(class_node, source_bytes: bytes) -> str:
+    """
+    Build class skeleton: class signature + method signatures + empty bodies.
+    """
+    lines = []
+
+    # Class signature: everything up to the class_body opening brace
+    class_sig_parts = []
+    for child in class_node.children:
+        if child.type == "class_body":
+            break
+        class_sig_parts.append(_node_text(child, source_bytes))
+    lines.append(" ".join(class_sig_parts).strip() + " {")
+
+    # Class docstring
+    class_doc = _java_preceding_comment(class_node, source_bytes)
+    if class_doc:
+        lines.append(f'    /** {class_doc} */')
+
+    # Methods and constructors
+    for child in class_node.children:
+        if child.type != "class_body":
+            continue
+        for item in child.children:
+            if item.type in ("method_declaration", "constructor_declaration"):
+                doc = _java_preceding_comment(item, source_bytes)
+                if doc:
+                    lines.append(f"    /** {doc} */")
+                sig = _java_method_signature(item, source_bytes)
+                lines.append(f"    {sig} {{ }}")
+                lines.append("")
+
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _collect_java_imports(root, source_bytes: bytes) -> list[tuple[str, list[str]]]:
+    """
+    Collect Java import declarations.
+    Returns (statement_text, [names_introduced]) tuples.
+    For 'import java.util.List' → name is 'List' (last segment).
+    For static 'import static Collections.sort' → name is 'sort'.
+    """
+    results = []
+    for node in root.children:
+        if node.type != "import_declaration":
+            continue
+        stmt_text = _node_text(node, source_bytes)
+        for child in node.children:
+            if child.type == "scoped_identifier":
+                full = _node_text(child, source_bytes)
+                name = full.split(".")[-1]
+                if name != "*":
+                    results.append((stmt_text, [name]))
+                else:
+                    results.append((stmt_text, ["*"]))
+                break
+    return results
+
+
+def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[FunctionRecord], list[ClassRecord]]:
+    parser, _ = _get_parser("Java")
+    source_bytes = source.encode("utf-8")
+    tree = parser.parse(source_bytes)
+    root = tree.root_node
+
+    file_imports = _collect_java_imports(root, source_bytes)
+    functions: list[FunctionRecord] = []
+    classes: list[ClassRecord] = []
+
+    def walk(node, parent_class: Optional[str] = None):
+        if node.type == "class_declaration":
+            # Class name
+            name_node = next((c for c in node.children if c.type == "identifier"), None)
+            class_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+
+            # Superclass
+            parent_classes = []
+            for child in node.children:
+                if child.type == "superclass":
+                    for sc in child.children:
+                        if sc.type in ("type_identifier", "generic_type"):
+                            parent_classes.append(_node_text(sc, source_bytes))
+                elif child.type == "super_interfaces":
+                    for sc in child.children:
+                        if sc.type == "type_list":
+                            for t in sc.children:
+                                if t.type in ("type_identifier", "generic_type"):
+                                    parent_classes.append(_node_text(t, source_bytes))
+
+            docstring = _java_preceding_comment(node, source_bytes)
+            source_code = _clean_indentation(_node_text(node, source_bytes))
+            skeleton = _build_java_skeleton(node, source_bytes)
+            used_imports = _filter_used_imports(file_imports, source_code)
+
+            method_names = []
+            has_constructor = False
+            for child in node.children:
+                if child.type == "class_body":
+                    for item in child.children:
+                        if item.type == "method_declaration":
+                            mn = next((c for c in item.children if c.type == "identifier"), None)
+                            if mn:
+                                method_names.append(_node_text(mn, source_bytes))
+                        elif item.type == "constructor_declaration":
+                            has_constructor = True
+
+            classes.append(ClassRecord(
+                repo=repo,
+                file_path=file_path,
+                language="Java",
+                class_name=class_name,
+                parent_classes=parent_classes,
+                docstring=docstring,
+                source_code=source_code,
+                skeleton=skeleton,
+                used_imports=used_imports,
+                method_names=method_names,
+                method_count=len(method_names),
+                has_constructor=has_constructor,
+                decorators=[],
+                start_line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+            ))
+
+            # Walk class body for methods
+            for child in node.children:
+                if child.type == "class_body":
+                    for item in child.children:
+                        walk(item, parent_class=class_name)
+
+        elif node.type in ("method_declaration", "constructor_declaration"):
+            name_node = next((c for c in node.children if c.type == "identifier"), None)
+            func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+
+            # Parameters
+            params = []
+            for child in node.children:
+                if child.type == "formal_parameters":
+                    for p in child.children:
+                        if p.type == "formal_parameter":
+                            param_id = next(
+                                (c for c in reversed(p.children) if c.type == "identifier"), None
+                            )
+                            if param_id:
+                                params.append(_node_text(param_id, source_bytes))
+
+            # Return type: first type-like node before identifier
+            ret_annotation = None
+            for child in node.children:
+                if child.type == "identifier":
+                    break
+                if child.type not in ("modifiers", "type_parameters"):
+                    ret_annotation = _node_text(child, source_bytes)
+
+            docstring = _java_preceding_comment(node, source_bytes)
+            source_code = _clean_indentation(_node_text(node, source_bytes))
+
+            # Signature: sig line + docstring + { }
+            sig_line = _java_method_signature(node, source_bytes)
+            sig_parts = [sig_line + " { }"]
+            if docstring:
+                sig_parts = [f"/** {docstring} */", sig_line + " { }"]
+            signature = "\n".join(sig_parts)
+
+            used_imports = _filter_used_imports(file_imports, source_code)
+
+            functions.append(FunctionRecord(
+                repo=repo,
+                file_path=file_path,
+                language="Java",
+                func_name=func_name,
+                parameters=params,
+                return_annotation=ret_annotation,
+                docstring=docstring,
+                source_code=source_code,
+                signature=signature,
+                used_imports=used_imports,
+                start_line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+                is_method=parent_class is not None,
+                parent_class=parent_class,
+                decorators=[],
+            ))
+
+        else:
+            for child in node.children:
+                walk(child, parent_class)
+
+    walk(root)
+    return functions, classes
+
+
+# ─── JavaScript Extraction ────────────────────────────────────────────────────
+
+def _js_preceding_comment(node, source_bytes: bytes) -> Optional[str]:
+    """
+    Return cleaned JSDoc comment immediately preceding node, or None.
+    Handles both /** ... */ block comments and // line comments.
+    """
+    parent = node.parent
+    if not parent:
+        return None
+    siblings = list(parent.children)
+    idx = next((i for i, c in enumerate(siblings) if c == node), -1)
+    if idx > 0:
+        prev = siblings[idx - 1]
+        if prev.type == "comment":
+            raw = _node_text(prev, source_bytes).strip()
+            if raw.startswith("/**"):
+                return _clean_block_comment(raw)
+            elif raw.startswith("//"):
+                return raw.lstrip("/").strip() or None
+    return None
+
+
+def _js_method_signature(method_node, source_bytes: bytes) -> str:
+    """
+    Reconstruct JS method signature: everything up to (not including) the body block.
+    """
+    parts = []
+    for child in method_node.children:
+        if child.type == "statement_block":
+            break
+        parts.append(_node_text(child, source_bytes))
+    return " ".join(parts).strip()
+
+
+def _build_js_skeleton(class_node, source_bytes: bytes) -> str:
+    """
+    Build JS class skeleton: class signature + method signatures + empty bodies.
+    """
+    lines = []
+
+    # Class signature
+    sig_parts = []
+    for child in class_node.children:
+        if child.type == "class_body":
+            break
+        sig_parts.append(_node_text(child, source_bytes))
+    lines.append(" ".join(sig_parts).strip() + " {")
+
+    class_doc = _js_preceding_comment(class_node, source_bytes)
+    if class_doc:
+        lines.append(f"    /** {class_doc} */")
+
+    for child in class_node.children:
+        if child.type != "class_body":
+            continue
+        for item in child.children:
+            if item.type == "method_definition":
+                doc = _js_preceding_comment(item, source_bytes)
+                if doc:
+                    lines.append(f"    /** {doc} */")
+                sig = _js_method_signature(item, source_bytes)
+                lines.append(f"    {sig} {{ }}")
+                lines.append("")
+
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _collect_js_imports(root, source_bytes: bytes) -> list[tuple[str, list[str]]]:
+    """
+    Collect ES6 import statements.
+    Handles: default imports, named imports, namespace imports.
+    """
+    results = []
+    for node in root.children:
+        if node.type != "import_statement":
+            continue
+        stmt_text = _node_text(node, source_bytes)
+        names = []
+        for child in node.children:
+            if child.type == "import_clause":
+                for sub in child.children:
+                    if sub.type == "identifier":
+                        # default import: import fs from '...'
+                        names.append(_node_text(sub, source_bytes))
+                    elif sub.type == "named_imports":
+                        # named: import { A, B as C }
+                        for spec in sub.children:
+                            if spec.type == "import_specifier":
+                                # alias takes priority
+                                alias = spec.child_by_field_name("alias")
+                                name_node = spec.child_by_field_name("name")
+                                if alias:
+                                    names.append(_node_text(alias, source_bytes))
+                                elif name_node:
+                                    names.append(_node_text(name_node, source_bytes))
+                    elif sub.type == "namespace_import":
+                        # import * as path
+                        for ns in sub.children:
+                            if ns.type == "identifier":
+                                names.append(_node_text(ns, source_bytes))
+        if names:
+            results.append((stmt_text, names))
+    return results
+
+
+def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRecord], list[ClassRecord]]:
+    parser, _ = _get_parser("JavaScript")
+    source_bytes = source.encode("utf-8")
+    tree = parser.parse(source_bytes)
+    root = tree.root_node
+
+    file_imports = _collect_js_imports(root, source_bytes)
+    functions: list[FunctionRecord] = []
+    classes: list[ClassRecord] = []
+
+    def walk(node, parent_class: Optional[str] = None):
+        if node.type == "class_declaration":
+            name_node = next((c for c in node.children if c.type == "identifier"), None)
+            class_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+
+            parent_classes = []
+            for child in node.children:
+                if child.type == "class_heritage":
+                    for sub in child.children:
+                        if sub.type == "identifier":
+                            parent_classes.append(_node_text(sub, source_bytes))
+
+            docstring = _js_preceding_comment(node, source_bytes)
+            source_code = _clean_indentation(_node_text(node, source_bytes))
+            skeleton = _build_js_skeleton(node, source_bytes)
+            used_imports = _filter_used_imports(file_imports, source_code)
+
+            method_names = []
+            has_constructor = False
+            for child in node.children:
+                if child.type == "class_body":
+                    for item in child.children:
+                        if item.type == "method_definition":
+                            mn = next((c for c in item.children if c.type == "property_identifier"), None)
+                            if mn:
+                                mname = _node_text(mn, source_bytes)
+                                method_names.append(mname)
+                                if mname == "constructor":
+                                    has_constructor = True
+
+            classes.append(ClassRecord(
+                repo=repo,
+                file_path=file_path,
+                language="JavaScript",
+                class_name=class_name,
+                parent_classes=parent_classes,
+                docstring=docstring,
+                source_code=source_code,
+                skeleton=skeleton,
+                used_imports=used_imports,
+                method_names=method_names,
+                method_count=len(method_names),
+                has_constructor=has_constructor,
+                decorators=[],
+                start_line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+            ))
+
+            # Walk class body for methods
+            for child in node.children:
+                if child.type == "class_body":
+                    for item in child.children:
+                        walk(item, parent_class=class_name)
+
+        elif node.type == "function_declaration":
+            name_node = next((c for c in node.children if c.type == "identifier"), None)
+            func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+            _append_js_function(node, func_name, parent_class)
+
+        elif node.type == "method_definition":
+            name_node = next((c for c in node.children if c.type == "property_identifier"), None)
+            func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+            _append_js_function(node, func_name, parent_class)
+
+        elif node.type == "lexical_declaration":
+            # const arrowFunc = (x) => x * 2
+            for child in node.children:
+                if child.type == "variable_declarator":
+                    arrow = next(
+                        (c for c in child.children if c.type == "arrow_function"), None
+                    )
+                    if arrow:
+                        name_node = next(
+                            (c for c in child.children if c.type == "identifier"), None
+                        )
+                        func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+                        _append_js_function(arrow, func_name, parent_class, is_arrow=True)
+
+        else:
+            for child in node.children:
+                walk(child, parent_class)
+
+    def _append_js_function(node, func_name: str, parent_class: Optional[str], is_arrow: bool = False):
+        params = []
+        for child in node.children:
+            if child.type == "formal_parameters":
+                for p in child.children:
+                    if p.type in ("identifier", "assignment_pattern", "rest_pattern"):
+                        params.append(_node_text(p, source_bytes))
+            elif child.type == "identifier" and is_arrow:
+                # single-param arrow: x => x * 2
+                params.append(_node_text(child, source_bytes))
+
+        docstring = _js_preceding_comment(node, source_bytes) if not is_arrow else None
+        source_code = _clean_indentation(_node_text(node, source_bytes))
+
+        sig_line = _js_method_signature(node, source_bytes) if not is_arrow else f"{func_name} = {_node_text(node, source_bytes).split('{')[0].strip()}"
+        sig_parts = [sig_line + " { }"]
+        if docstring:
+            sig_parts = [f"/** {docstring} */", sig_line + " { }"]
+        signature = "\n".join(sig_parts)
+
+        used_imports = _filter_used_imports(file_imports, source_code)
+
+        functions.append(FunctionRecord(
+            repo=repo,
+            file_path=file_path,
+            language="JavaScript",
+            func_name=func_name,
+            parameters=params,
+            return_annotation=None,  # JS has no return type annotations in vanilla JS
+            docstring=docstring,
+            source_code=source_code,
+            signature=signature,
+            used_imports=used_imports,
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
+            is_method=parent_class is not None,
+            parent_class=parent_class,
+            decorators=[],
+        ))
+
+    walk(root)
+    return functions, classes
+
+
 # ─── Public API ──────────────────────────────────────────────────────────────
 
 LANGUAGE_EXTENSIONS = {
@@ -481,6 +959,10 @@ def extract_from_file(
 
     if language == "Python":
         return _extract_python(source, stored_path, repo)
+    elif language == "Java":
+        return _extract_java(source, stored_path, repo)
+    elif language == "JavaScript":
+        return _extract_js(source, stored_path, repo)
     else:
         logger.warning(f"Extraction for {language} not yet implemented.")
         return [], []
@@ -520,6 +1002,12 @@ def extract_from_repo(
         if any(p in file_path.parts for p in {"test", "tests", "__tests__", "spec", "specs"}):
             continue
         if file_path.name.startswith("test_") or file_path.name.endswith("_test.py"):
+            continue
+        if file_path.name.startswith("Test") or file_path.name.endswith("Test.java"):
+            continue
+        if file_path.name.endswith(".test.js") or file_path.name.endswith(".spec.js"):
+            continue
+        if file_path.name.endswith(".test.ts") or file_path.name.endswith(".spec.ts"):
             continue
 
         funcs, classes = extract_from_file(

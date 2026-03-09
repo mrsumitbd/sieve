@@ -6,7 +6,7 @@ and reproducibility (config file in, dataset out).
 
 Usage:
     python -m sieve.cli run --config config.json
-    python -m sieve.cli run --language Python --cutoff-date 2024-01-01 --min-stars 50
+    python -m sieve.cli run --language Python --start-date 2024-01-01 --end-date 2025-01-01 --min-stars 50
 """
 
 import json
@@ -44,11 +44,15 @@ def run(
         None, "--config", "-c", help="Path to a JSON config file"
     ),
     language: Optional[str] = typer.Option(None, help="Programming language"),
-    cutoff_date: Optional[str] = typer.Option(None, help="Cutoff date (YYYY-MM-DD)"),
+    start_date: Optional[str] = typer.Option(None, help="Start date — repos pushed on or after (YYYY-MM-DD)"),
+    end_date: Optional[str] = typer.Option(None, help="End date — repos pushed on or before (YYYY-MM-DD). Defaults to today."),
     min_stars: int = typer.Option(10, help="Minimum stars"),
     min_contributors: int = typer.Option(1, help="Minimum contributors"),
-    max_repos: Optional[int] = typer.Option(None, help="Max repos to process"),
+    max_repos: Optional[int] = typer.Option(None, help="Max repos to process (default: no cap)"),
+    max_functions: Optional[int] = typer.Option(None, help="Max functions after deduplication — stratified by repo (default: no cap)"),
+    max_classes: Optional[int] = typer.Option(None, help="Max classes after deduplication — stratified by repo (default: no cap)"),
     require_tests: bool = typer.Option(False, help="Only include repos with test suites"),
+    engineered_only: bool = typer.Option(False, help="Apply engineered project filter (Xiao/Munaiah)"),
     deduplicate: bool = typer.Option(True, help="Enable deduplication"),
     dedup_threshold: float = typer.Option(0.8, help="Dedup similarity threshold"),
     output_dir: str = typer.Option("./sieve_output", help="Output directory"),
@@ -65,18 +69,29 @@ def run(
         if not language:
             console.print("[red]--language is required when not using a config file.[/red]")
             raise typer.Exit(1)
-        if not cutoff_date:
-            console.print("[red]--cutoff-date is required when not using a config file.[/red]")
+        if not start_date:
+            console.print("[red]--start-date is required when not using a config file.[/red]")
+            raise typer.Exit(1)
+
+        try:
+            parsed_start = date.fromisoformat(start_date)
+            parsed_end = date.fromisoformat(end_date) if end_date else date.today()
+        except ValueError as e:
+            console.print(f"[red]Invalid date format: {e}. Use YYYY-MM-DD.[/red]")
             raise typer.Exit(1)
 
         config = SIEVEConfig(
             language=language,
-            cutoff_date=date.fromisoformat(cutoff_date),
+            start_date=parsed_start,
+            end_date=parsed_end,
             min_stars=min_stars,
             min_contributors=min_contributors,
             max_repos=max_repos,
+            max_functions=max_functions,
+            max_classes=max_classes,
             granularity=["function", "class"],
             require_tests=require_tests,
+            engineered_only=engineered_only,
             deduplicate=deduplicate,
             dedup_threshold=dedup_threshold,
             output_dir=output_dir,
@@ -105,11 +120,11 @@ def run(
     table = Table(title="SIEVE Summary")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="white")
-    table.add_row("Repos Discovered", str(summary["total_repos_discovered"]))
-    table.add_row("Repos Processed", str(summary["total_repos_processed"]))
-    table.add_row("Repos Failed", str(summary["total_repos_failed"]))
+    table.add_row("Repos Discovered",  str(summary["total_repos_discovered"]))
+    table.add_row("Repos Processed",   str(summary["total_repos_processed"]))
+    table.add_row("Repos Failed",      str(summary["total_repos_failed"]))
     table.add_row("Functions Extracted", str(summary["total_functions"]))
-    table.add_row("Classes Extracted", str(summary["total_classes"]))
+    table.add_row("Classes Extracted",   str(summary["total_classes"]))
     console.print(table)
 
     console.print("\n[bold]Output files:[/bold]")
