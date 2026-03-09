@@ -140,7 +140,8 @@ def detect_test_suite(repo_path: str, language: str) -> TestSuiteReport:
         # Skip hidden directories and common non-source dirs
         dirnames[:] = [
             d for d in dirnames
-            if not d.startswith(".") and d not in {"node_modules", "__pycache__", ".git", "venv", ".venv", "env"}
+            if d not in {"node_modules", "__pycache__", ".git", "venv", ".venv", "env"}
+            and (not d.startswith(".") or d == ".github")
         ]
 
         rel_dir = Path(dirpath).relative_to(root)

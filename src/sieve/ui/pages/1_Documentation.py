@@ -175,13 +175,13 @@ with tab_func:
     | `return_annotation` | str \\| null | Return type annotation if present |
     | `docstring` | str \\| null | Docstring content, stripped of delimiters |
     | `source_code` | str | Full function source, indentation-normalized |
-    | `signature` | str | `def` line + docstring + `pass` — no body |
+    | `signature` | str | Function header + docstring + empty body — no implementation |
     | `used_imports` | list[str] | Import statements whose names appear in the function body |
     | `start_line` | int | Start line in the original file (body only, excludes imports) |
     | `end_line` | int | End line in the original file (body only, excludes imports) |
     | `is_method` | bool | True if defined inside a class |
     | `parent_class` | str \\| null | Enclosing class name if `is_method` is true |
-    | `decorators` | list[str] | Decorator strings (populated in future release) |
+    | `decorators` | list[str] | Decorator/annotation strings (e.g. `@staticmethod`, `@Override`) |
     | `llm_score` | float \\| null | P(LLM-generated) — reserved for future classifier |
     """)
 
@@ -200,8 +200,8 @@ with tab_class:
     | `used_imports` | list[str] | Import statements whose names appear in the class body |
     | `method_names` | list[str] | Names of all methods defined in the class |
     | `method_count` | int | Number of methods |
-    | `has_constructor` | bool | True if `__init__` is defined |
-    | `decorators` | list[str] | Decorator strings (populated in future release) |
+    | `has_constructor` | bool | True if a constructor is defined (`__init__` in Python, `constructor` in JS, constructor declaration in Java) |
+    | `decorators` | list[str] | Decorator/annotation strings on the class (e.g. `@dataclass`, `@Entity`) |
     | `start_line` | int | Start line in the original file (body only, excludes imports) |
     | `end_line` | int | End line in the original file (body only, excludes imports) |
     | `llm_score` | float \\| null | P(LLM-generated) — reserved for future classifier |
@@ -359,13 +359,24 @@ with st.expander("What GitHub API rate limits should I expect?"):
 
 with st.expander("Which languages are supported?"):
     st.markdown("""
-    Currently **Python only** for function and class extraction. The extraction pipeline
-    uses tree-sitter grammars and is designed to be extended — Java and JavaScript stubs
-    are in place in `extraction.py` but not yet implemented.
+    **Python, Java, and JavaScript** are all fully supported for function and class extraction.
+    All three use tree-sitter grammars under the hood.
 
-    Discovery and repository filtering work for any of the three configured languages
-    (Python, Java, JavaScript), but extraction will return empty results for Java and
-    JavaScript until their extractors are implemented.
+    **Python** extracts `function_definition` and `class_definition` nodes, including
+    async functions, decorators (`@staticmethod`, `@dataclass`, etc.), type annotations,
+    and default parameter values.
+
+    **Java** extracts `method_declaration`, `constructor_declaration`, and `class_declaration`
+    nodes, including annotations (`@Override`, `@SuppressWarnings`), Javadoc comments,
+    generic type parameters, and `extends`/`implements` relationships.
+
+    **JavaScript** extracts `function_declaration`, `method_definition`, `class_declaration`,
+    and arrow functions assigned to `const`. Handles default imports, named imports, and
+    namespace imports (`import * as`). TypeScript (`.ts`, `.tsx`) files are processed using
+    the JavaScript grammar — type annotations are preserved in parameter strings but not
+    separately parsed.
+
+    Discovery and repository filtering support all three languages at the GitHub search level.
     """)
 
 with st.expander("How is 'used imports' different from all imports in the file?"):
@@ -393,4 +404,4 @@ with st.expander("What is the LLM Score field?"):
     """)
 
 st.divider()
-st.caption("SIEVE v0.1.0 · Built for SE research · [GitHub](https://github.com/your-org/sieve)")
+st.caption("SIEVE v0.1.0 · Built for SE research · [GitHub](https://github.com/mrsumitbd/sieve)")

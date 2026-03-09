@@ -344,7 +344,26 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
     functions: list[FunctionRecord] = []
     classes: list[ClassRecord] = []
 
-    def walk(node, parent_class: Optional[str] = None):
+    def walk(node, parent_class: Optional[str] = None, decorators: list[str] = None):
+        if decorators is None:
+            decorators = []
+
+        if node.type == "decorated_definition":
+            # Collect all decorator texts, then recurse into the inner definition
+            dec_texts = [
+                _node_text(child, source_bytes)
+                for child in node.children
+                if child.type == "decorator"
+            ]
+            inner = next(
+                (child for child in node.children
+                 if child.type in ("function_definition", "async_function_definition", "class_definition")),
+                None,
+            )
+            if inner:
+                walk(inner, parent_class=parent_class, decorators=dec_texts)
+            return
+
         if node.type in ("function_definition", "async_function_definition"):
             name_node = node.child_by_field_name("name")
             func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
@@ -379,7 +398,7 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
                 end_line=node.end_point[0] + 1,
                 is_method=parent_class is not None,
                 parent_class=parent_class,
-                decorators=[],
+                decorators=decorators,
             ))
 
             for child in node.children:
@@ -406,8 +425,15 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
             for child in node.children:
                 if child.type == "block":
                     for item in child.children:
-                        if item.type in ("function_definition", "async_function_definition"):
-                            mn = item.child_by_field_name("name")
+                        inner_node = item
+                        if item.type == "decorated_definition":
+                            inner_node = next(
+                                (c for c in item.children
+                                 if c.type in ("function_definition", "async_function_definition")),
+                                None,
+                            )
+                        if inner_node and inner_node.type in ("function_definition", "async_function_definition"):
+                            mn = inner_node.child_by_field_name("name")
                             if mn:
                                 mname = _node_text(mn, source_bytes)
                                 method_names.append(mname)
@@ -427,7 +453,7 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
                 method_names=method_names,
                 method_count=len(method_names),
                 has_constructor=has_constructor,
-                decorators=[],
+                decorators=decorators,
                 start_line=node.start_point[0] + 1,
                 end_line=node.end_point[0] + 1,
             ))
@@ -581,6 +607,14 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
             skeleton = _build_java_skeleton(node, source_bytes)
             used_imports = _filter_used_imports(file_imports, source_code)
 
+            # Annotations on the class
+            class_annotations = []
+            for child in node.children:
+                if child.type == "modifiers":
+                    for mod in child.children:
+                        if mod.type in ("marker_annotation", "annotation"):
+                            class_annotations.append(_node_text(mod, source_bytes))
+
             method_names = []
             has_constructor = False
             for child in node.children:
@@ -606,7 +640,7 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
                 method_names=method_names,
                 method_count=len(method_names),
                 has_constructor=has_constructor,
-                decorators=[],
+                decorators=class_annotations,
                 start_line=node.start_point[0] + 1,
                 end_line=node.end_point[0] + 1,
             ))
@@ -644,6 +678,14 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
             docstring = _java_preceding_comment(node, source_bytes)
             source_code = _clean_indentation(_node_text(node, source_bytes))
 
+            # Annotations from modifiers node
+            method_annotations = []
+            for child in node.children:
+                if child.type == "modifiers":
+                    for mod in child.children:
+                        if mod.type in ("marker_annotation", "annotation"):
+                            method_annotations.append(_node_text(mod, source_bytes))
+
             # Signature: sig line + docstring + { }
             sig_line = _java_method_signature(node, source_bytes)
             sig_parts = [sig_line + " { }"]
@@ -668,7 +710,7 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
                 end_line=node.end_point[0] + 1,
                 is_method=parent_class is not None,
                 parent_class=parent_class,
-                decorators=[],
+                decorators=method_annotations,
             ))
 
         else:
