@@ -1,6 +1,13 @@
 # 🔬 SIEVE
 **Software Ingestion & Extraction for Verifiable Evaluation**
 
+[![Coverage](https://codecov.io/gh/your-org/sieve/graph/badge.svg?token=YOUR_CODECOV_TOKEN)](https://codecov.io/gh/your-org/sieve)
+![Tests](https://img.shields.io/badge/tests-214%20passed-brightgreen?style=flat-square)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
+![Languages](https://img.shields.io/badge/languages-Python%20%7C%20Java%20%7C%20JavaScript-orange?style=flat-square)
+![Venue](https://img.shields.io/badge/venue-ICSME%202025-blueviolet?style=flat-square)
+
 SIEVE is a parameterized GitHub corpus builder for software engineering research. It lets you curate contamination-aware, high-quality code datasets from public repositories with full control over language, recency, repository quality, and test suite presence.
 
 ---
@@ -34,7 +41,7 @@ Verify installation: `cloc --version`
 
 **1. Clone the repository**
 ```bash
-git clone https://github.com/mrsumitbd/sieve.git
+git clone https://github.com/your-org/sieve.git
 cd sieve
 ```
 
@@ -241,10 +248,10 @@ The suite covers 179 tests across unit, integration, and end-to-end levels. GitH
 If you use SIEVE in your research, please cite:
 
 ```bibtex
-@inproceedings{sieve2026,
+@inproceedings{sieve2025,
   title     = {SIEVE: A Parameterized Corpus Builder for Contamination-Aware Software Engineering Research},
   author    = {Rahman, Musfiqur and Shihab, Emad},
   booktitle = {Proceedings of the International Conference on Software Maintenance and Evolution (ICSME)},
-  year      = {2026}
+  year      = {2025}
 }
 ```

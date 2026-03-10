@@ -238,3 +238,121 @@ class TestPipelineRepoStats:
         for field in ("repo", "stars", "contributors", "functions", "classes",
                       "test_suite_present", "license"):
             assert field in rs
+
+
+class TestPipelineCloneFailure:
+    def test_failed_clone_counted_in_failed_repos(self, base_config):
+        meta = _make_repo_meta()
+
+        with patch("sieve.pipeline.discover_repos", return_value=iter([meta])), \
+             patch("sieve.pipeline._clone_repo", return_value=False):
+            summary = run_pipeline(base_config)
+
+        assert summary["total_repos_failed"] == 1
+        assert "test-owner/test-repo" in summary["failed_repos"]
+        assert summary["total_functions"] == 0
+        assert summary["total_classes"] == 0
+
+    def test_partial_failure_still_exports_successful_repos(self, tmp_path, synthetic_repo):
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+        meta_good = _make_repo_meta("owner/good-repo")
+        meta_bad = _make_repo_meta("owner/bad-repo")
+
+        def selective_clone(repo_full_name, target_dir):
+            if "bad" in repo_full_name:
+                return False
+            shutil.copytree(str(synthetic_repo), target_dir, dirs_exist_ok=True)
+            return True
+
+        with patch("sieve.pipeline.discover_repos", return_value=iter([meta_good, meta_bad])), \
+             patch("sieve.pipeline._clone_repo", side_effect=selective_clone):
+            summary = run_pipeline(config)
+
+        assert summary["total_repos_processed"] == 1
+        assert summary["total_repos_failed"] == 1
+        assert summary["total_functions"] > 0
+
+
+class TestPipelineEngineeredOnly:
+    def test_engineered_only_calls_apply_filters(self, tmp_path, synthetic_repo):
+        from sieve.core.quality import RepoQualityMetrics
+
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            engineered_only=True,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+        meta = _make_repo_meta()
+
+        passing_metrics = RepoQualityMetrics(
+            full_name=meta.full_name,
+            license_spdx="MIT",
+            contributor_count=10,
+            release_count=3,
+            pull_request_count=50,
+            issue_count=30,
+            loc=1000,
+            comment_lines=100,
+            code_ratio=0.9,
+            passes_stage1=True,
+            passes_stage2=True,
+        )
+        passing_metrics.passes_stage3 = True
+
+        def fake_clone(repo_full_name, target_dir):
+            shutil.copytree(str(synthetic_repo), target_dir, dirs_exist_ok=True)
+            return True
+
+        with patch("sieve.pipeline.discover_repos", return_value=iter([meta])), \
+             patch("sieve.pipeline._clone_repo", side_effect=fake_clone), \
+             patch("sieve.pipeline.collect_metrics", return_value=passing_metrics), \
+             patch("sieve.pipeline.apply_filters", return_value=[passing_metrics]) as mock_filter:
+            summary = run_pipeline(config)
+
+        mock_filter.assert_called_once()
+        assert summary["total_repos_processed"] == 1
+
+    def test_engineered_only_excludes_failing_repos(self, tmp_path):
+        from sieve.core.quality import RepoQualityMetrics
+
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            engineered_only=True,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+        meta = _make_repo_meta()
+
+        failing_metrics = RepoQualityMetrics(
+            full_name=meta.full_name,
+            license_spdx=None,
+            contributor_count=1,
+            release_count=0,
+            pull_request_count=0,
+            issue_count=0,
+            loc=0,
+            comment_lines=0,
+            code_ratio=0.0,
+            passes_stage1=False,
+            passes_stage2=False,
+        )
+
+        with patch("sieve.pipeline.discover_repos", return_value=iter([meta])), \
+             patch("sieve.pipeline._clone_repo", return_value=True), \
+             patch("sieve.pipeline.collect_metrics", return_value=failing_metrics), \
+             patch("sieve.pipeline.apply_filters", return_value=[failing_metrics]):
+            summary = run_pipeline(config)
+
+        assert summary["total_repos_processed"] == 0
+        assert summary["total_functions"] == 0

@@ -79,6 +79,17 @@ class TestLanguages:
             SIEVEConfig(language="Rust", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1))
 
 
+class TestGranularity:
+    def test_empty_granularity_raises(self):
+        with pytest.raises(ValidationError):
+            SIEVEConfig(
+                language="Python",
+                start_date=date(2024, 1, 1),
+                end_date=date(2025, 1, 1),
+                granularity=[],
+            )
+
+
 class TestExportFormats:
     @pytest.mark.parametrize("fmt", ["jsonl", "parquet", "both"])
     def test_all_formats_accepted(self, fmt):
