@@ -14,10 +14,13 @@ When engineered_only=False, repos are processed as they are discovered
 """
 
 import logging
+import math
+import random
 import shutil
 import subprocess
 import tempfile
 import time
+from collections import defaultdict
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Optional
@@ -104,6 +107,49 @@ def _process_repo(
             }
 
         return funcs, classes, meta_dict
+
+
+def _stratified_sample(records: list, cap: int, key: str = "repo") -> list:
+    """
+    Sample ``cap`` records from ``records`` with proportional allocation
+    across repos.  Remainder slots are awarded to repos with the largest
+    fractional parts, ensuring the total is exactly ``cap``.
+
+    Args:
+        records: List of FunctionRecord or ClassRecord objects.
+        cap:     Maximum number of records to keep.
+        key:     Attribute name to group by (default ``"repo"``).
+
+    Returns:
+        Sampled list of length ``min(len(records), cap)``.
+    """
+    if len(records) <= cap:
+        return records
+
+    by_repo: dict[str, list] = defaultdict(list)
+    for r in records:
+        by_repo[getattr(r, key)].append(r)
+
+    total = len(records)
+    result: list = []
+    remainders: dict[str, float] = {}
+
+    for repo, items in by_repo.items():
+        exact = cap * len(items) / total
+        base = int(exact)
+        remainders[repo] = exact - base
+        result.extend(random.sample(items, min(base, len(items))))
+
+    # Fill remainder slots from repos with the highest fractional parts
+    shortfall = cap - len(result)
+    if shortfall > 0:
+        sorted_repos = sorted(remainders, key=lambda r: remainders[r], reverse=True)
+        for repo in sorted_repos[:shortfall]:
+            pool = [x for x in by_repo[repo] if x not in result]
+            if pool:
+                result.append(random.choice(pool))
+
+    return result
 
 
 def run_pipeline(
@@ -213,44 +259,6 @@ def run_pipeline(
         all_classes   = deduplicate(all_classes,   threshold=config.dedup_threshold)
 
     # ── Phase 4b: Corpus size caps (stratified by repo) ──────────────────────
-
-    def _stratified_sample(records, cap: int, key: str = "repo") -> list:
-        """
-        Sample `cap` records from `records` with proportional allocation
-        across repos.  Any remainder is filled by sampling from repos with
-        the largest allocations, ensuring the total is exactly `cap`.
-        """
-        import math
-        from collections import defaultdict
-
-        by_repo: dict[str, list] = defaultdict(list)
-        for r in records:
-            by_repo[getattr(r, key)].append(r)
-
-        n_repos = len(by_repo)
-        total = len(records)
-        result = []
-        remainders = {}
-
-        for repo, items in by_repo.items():
-            exact = cap * len(items) / total
-            base = int(exact)
-            remainders[repo] = exact - base
-            import random
-            result.extend(random.sample(items, min(base, len(items))))
-
-        # Fill remainder slots from repos with highest fractional parts
-        shortfall = cap - len(result)
-        if shortfall > 0:
-            sorted_repos = sorted(remainders, key=lambda r: remainders[r], reverse=True)
-            already_taken = {r: sum(1 for x in result if getattr(x, key) == r) for r in by_repo}
-            for repo in sorted_repos[:shortfall]:
-                pool = [x for x in by_repo[repo] if x not in result]
-                if pool:
-                    import random
-                    result.append(random.choice(pool))
-
-        return result
 
     if config.max_functions is not None and len(all_functions) > config.max_functions:
         _progress(

@@ -34,7 +34,7 @@ Verify installation: `cloc --version`
 
 **1. Clone the repository**
 ```bash
-git clone https://github.com/your-org/sieve.git
+git clone https://github.com/mrsumitbd/sieve.git
 cd sieve
 ```
 
@@ -52,8 +52,22 @@ python -m venv .venv
 You should see `(.venv)` at the start of your terminal prompt confirming the environment is active. All subsequent commands run inside this isolated environment — your system Python is untouched.
 
 **3. Install SIEVE and its dependencies**
+
+Runtime only:
 ```bash
+pip install -r requirements.txt
 pip install -e .
+```
+
+For development and testing (includes pytest):
+```bash
+pip install -r requirements-dev.txt
+pip install -e .
+```
+
+Or equivalently using the package extras:
+```bash
+pip install -e ".[dev]"
 ```
 
 **4. Set up your GitHub token**
@@ -74,13 +88,13 @@ Open `.env` and replace `your_github_pat_here` with your GitHub Personal Access 
 streamlit run src/sieve/ui/app.py
 ```
 
-Open `http://localhost:8501` in your browser, configure parameters in the sidebar, and click **Run SIEVE**.
+Open `http://localhost:8501` in your browser. To explore SIEVE without a GitHub token, click **📦 Load Example Dataset** in the sidebar — this loads a pre-built corpus of 54 functions and 8 classes across three synthetic Python repositories, with no API calls required. To build a real corpus, configure parameters in the sidebar and click **▶ Run SIEVE**.
 
 ### CLI
 
 ```bash
 # Inline parameters
-sieve run --language Python --cutoff-date 2024-01-01 --min-stars 50 --min-contributors 5
+sieve run --language Python --start-date 2024-01-01 --end-date 2025-01-01 --min-stars 50 --min-contributors 5
 
 # Config file
 sieve run --config my_config.json
@@ -98,7 +112,8 @@ from sieve.pipeline import run_pipeline
 
 config = SIEVEConfig(
     language="Python",
-    cutoff_date=date(2024, 1, 1),
+    start_date=date(2024, 1, 1),
+    end_date=date(2025, 1, 1),
     min_stars=50,
     min_contributors=5,
     require_tests=True,
@@ -124,12 +139,16 @@ deactivate
 | Parameter | Type | Description |
 |---|---|---|
 | `language` | str | Target language: `Python`, `Java`, `JavaScript` |
-| `cutoff_date` | date | Repos pushed after this date only |
+| `start_date` | date | Only include repos pushed on or after this date |
+| `end_date` | date | Only include repos pushed on or before this date |
 | `min_stars` | int | Minimum GitHub stars |
 | `min_contributors` | int | Minimum unique contributors |
 | `max_repos` | int \| None | Cap on repos to process |
-| `granularity` | list | `function`, `class`, `file` |
-| `require_tests` | bool | Only include repos with detected test suite |
+| `max_functions` | int \| None | Cap on extracted functions (stratified sample drawn if exceeded) |
+| `max_classes` | int \| None | Cap on extracted classes (stratified sample drawn if exceeded) |
+| `granularity` | list | `function`, `class` |
+| `require_tests` | bool | Only include repos with a detected test suite |
+| `engineered_only` | bool | Apply Xiao et al. / Munaiah et al. engineered project filter |
 | `deduplicate` | bool | Apply MinHash near-duplicate removal |
 | `dedup_threshold` | float | Jaccard similarity threshold (default 0.8) |
 | `output_dir` | str | Local path for output files |
@@ -150,11 +169,14 @@ deactivate
   "return_annotation": "dict",
   "docstring": "Compute precision, recall, and F1.",
   "source_code": "def compute_metrics(...): ...",
+  "signature": "def compute_metrics(predictions, labels) -> dict: ...",
+  "used_imports": ["from sklearn.metrics import f1_score"],
+  "decorators": [],
   "start_line": 42,
   "end_line": 61,
   "is_method": false,
   "parent_class": null,
-  "decorators": []
+  "llm_score": null
 }
 ```
 
@@ -173,20 +195,41 @@ deactivate
   "method_count": 2,
   "has_constructor": true,
   "decorators": [],
+  "used_imports": ["import torch.nn as nn"],
   "start_line": 10,
-  "end_line": 45
+  "end_line": 45,
+  "llm_score": null
 }
 ```
+
+> `llm_score` is a placeholder for the CodeProbe classifier (P(LLM-generated) per record). It will be populated in a future release.
 
 ### Manifest (`manifest.json`)
 A JSON file capturing the full config, per-repo metadata (stars, contributors, license, test suite report), and summary statistics. Enables reproducibility — share the manifest to let others regenerate the same corpus.
 
 ---
 
+## Testing
+
+Run the full test suite with:
+```bash
+pytest
+```
+
+Or with coverage:
+```bash
+pytest --cov=sieve --cov-report=term-missing
+```
+
+The suite covers 179 tests across unit, integration, and end-to-end levels. GitHub and git are mocked in all tests — no network access is required.
+
+---
+
 ## Roadmap
 
-- [ ] Java and JavaScript extraction
+- [x] Java and JavaScript extraction
 - [ ] File-level granularity
+- [ ] `llm_score` population via CodeProbe classifier
 - [ ] Execution-based test coverage (Docker sandboxed)
 - [ ] SWE-bench style issue-to-fix task extraction
 - [ ] HuggingFace Datasets integration for direct push
@@ -198,10 +241,10 @@ A JSON file capturing the full config, per-repo metadata (stars, contributors, l
 If you use SIEVE in your research, please cite:
 
 ```bibtex
-@inproceedings{sieve2025,
+@inproceedings{sieve2026,
   title     = {SIEVE: A Parameterized Corpus Builder for Contamination-Aware Software Engineering Research},
   author    = {Rahman, Musfiqur and Shihab, Emad},
   booktitle = {Proceedings of the International Conference on Software Maintenance and Evolution (ICSME)},
-  year      = {2025}
+  year      = {2026}
 }
 ```
