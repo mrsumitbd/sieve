@@ -1,7 +1,7 @@
 # 🔬 SIEVE
 **Software Ingestion & Extraction for Verifiable Evaluation**
 
-[![Coverage](https://codecov.io/gh/your-org/sieve/graph/badge.svg?token=19aecee5-afb0-4d67-9c0d-bdab723ce8d3)](https://codecov.io/gh/mrsumitbd/sieve)
+[![Coverage](https://codecov.io/gh/mrsumitbd/sieve/graph/badge.svg?token=19aecee5-afb0-4d67-9c0d-bdab723ce8d3)](https://codecov.io/gh/mrsumitbd/sieve)
 ![Tests](https://img.shields.io/badge/tests-214%20passed-brightgreen?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
