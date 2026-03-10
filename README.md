@@ -187,7 +187,7 @@ deactivate
 }
 ```
 
-### Class-level (`classes.jsonl`) — OpenClassEval-compatible
+### Class-level (`classes.jsonl`) — OpenClassGen-compatible
 ```json
 {
   "repo": "owner/repo",
