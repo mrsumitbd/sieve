@@ -39,14 +39,21 @@ logger = logging.getLogger(__name__)
 def _clone_repo(repo_full_name: str, target_dir: str) -> bool:
     """Shallow clone a GitHub repo. Returns True on success."""
     url = f"https://github.com/{repo_full_name}.git"
-    result = subprocess.run(
-        ["git", "clone", "--depth", "1", url, target_dir],
-        capture_output=True, text=True, timeout=120,
-    )
-    if result.returncode != 0:
-        logger.warning(f"git clone failed for {repo_full_name}: {result.stderr.strip()}")
+    try:
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", url, target_dir],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode != 0:
+            logger.warning(f"git clone failed for {repo_full_name}: {result.stderr.strip()}")
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        logger.warning(f"git clone timed out for {repo_full_name} — repo too large, skipping")
         return False
-    return True
+    except Exception as e:
+        logger.warning(f"git clone error for {repo_full_name}: {e}")
+        return False
 
 
 def _process_repo(
@@ -60,53 +67,58 @@ def _process_repo(
     """
     repo_name = repo_meta.full_name
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        clone_path = str(Path(tmpdir) / "repo")
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            clone_path = str(Path(tmpdir) / "repo")
 
-        if not _clone_repo(repo_name, clone_path):
-            return [], [], None
+            if not _clone_repo(repo_name, clone_path):
+                return [], [], None
 
-        # Test suite detection
-        test_report = detect_test_suite(clone_path, config.language)
-        if config.require_tests and not test_report.is_present:
-            logger.info(f"  Skipping {repo_name}: no test suite detected")
-            return [], [], None
+            # Test suite detection
+            test_report = detect_test_suite(clone_path, config.language)
+            if config.require_tests and not test_report.is_present:
+                logger.info(f"  Skipping {repo_name}: no test suite detected")
+                return [], [], None
 
-        # Extraction
-        funcs, classes = extract_from_repo(
-            repo_path=clone_path,
-            language=config.language,
-            repo_name=repo_name,
-            granularities=config.granularity,
-        )
+            # Extraction
+            funcs, classes = extract_from_repo(
+                repo_path=clone_path,
+                language=config.language,
+                repo_name=repo_name,
+                granularities=config.granularity,
+            )
 
-        # Build metadata dict
-        meta_dict = {
-            "full_name": repo_meta.full_name,
-            "url": repo_meta.url,
-            "stars": repo_meta.stars,
-            "contributors": repo_meta.contributors,
-            "last_commit_date": repo_meta.last_commit_date,
-            "default_branch": repo_meta.default_branch,
-            "license_spdx": repo_meta.license_spdx,
-            "language": repo_meta.language,
-            "collected_at": repo_meta.collected_at,
-            "topics": repo_meta.topics,
-            "test_suite": test_report.to_dict(),
-        }
-
-        if quality_metrics:
-            meta_dict["quality"] = {
-                "pull_request_count": quality_metrics.pull_request_count,
-                "issue_count": quality_metrics.issue_count,
-                "loc": quality_metrics.loc,
-                "comment_lines": quality_metrics.comment_lines,
-                "code_ratio": quality_metrics.code_ratio,
-                "release_count": quality_metrics.release_count,
-                "passes_engineered_filter": quality_metrics.passes_all,
+            # Build metadata dict
+            meta_dict = {
+                "full_name": repo_meta.full_name,
+                "url": repo_meta.url,
+                "stars": repo_meta.stars,
+                "contributors": repo_meta.contributors,
+                "last_commit_date": repo_meta.last_commit_date,
+                "default_branch": repo_meta.default_branch,
+                "license_spdx": repo_meta.license_spdx,
+                "language": repo_meta.language,
+                "collected_at": repo_meta.collected_at,
+                "topics": repo_meta.topics,
+                "test_suite": test_report.to_dict(),
             }
 
-        return funcs, classes, meta_dict
+            if quality_metrics:
+                meta_dict["quality"] = {
+                    "pull_request_count": quality_metrics.pull_request_count,
+                    "issue_count": quality_metrics.issue_count,
+                    "loc": quality_metrics.loc,
+                    "comment_lines": quality_metrics.comment_lines,
+                    "code_ratio": quality_metrics.code_ratio,
+                    "release_count": quality_metrics.release_count,
+                    "passes_engineered_filter": quality_metrics.passes_all,
+                }
+
+            return funcs, classes, meta_dict
+
+    except Exception as e:
+        logger.warning(f"Unexpected error processing {repo_name}: {e} — skipping")
+        return [], [], None
 
 
 def _stratified_sample(records: list, cap: int, key: str = "repo") -> list:

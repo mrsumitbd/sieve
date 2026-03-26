@@ -329,3 +329,67 @@ class TestIncludeDetection:
         """)
         fn = next(f for f in funcs if f.func_name == "init")
         assert any("mylib" in imp for imp in fn.used_imports)
+
+
+class TestPointerReturnTypes:
+    def test_pointer_return_name_extracted(self):
+        funcs, _ = extract("""
+            Node* lca(Node* root, int n1, int n2) {
+                return nullptr;
+            }
+        """)
+        fn = next((f for f in funcs if f.func_name != "unknown"), None)
+        assert fn is not None
+        assert fn.func_name == "lca"
+
+    def test_const_pointer_return_name_extracted(self):
+        funcs, _ = extract("""
+            const wchar_t* printError(int hr) {
+                return nullptr;
+            }
+        """)
+        fn = next((f for f in funcs if f.func_name != "unknown"), None)
+        assert fn is not None
+        assert fn.func_name == "printError"
+
+    def test_scoped_pointer_return_name_extracted(self):
+        funcs, _ = extract("""
+            GL_ShapeDrawer::ShapeCache* GL_ShapeDrawer::cache(int shape) {
+                return nullptr;
+            }
+        """)
+        fn = next((f for f in funcs if f.func_name != "unknown"), None)
+        assert fn is not None
+        assert fn.func_name == "cache"
+
+    def test_double_pointer_return_name_extracted(self):
+        funcs, _ = extract("""
+            char** get_args(int n) {
+                return nullptr;
+            }
+        """)
+        fn = next((f for f in funcs if f.func_name != "unknown"), None)
+        assert fn is not None
+        assert fn.func_name == "get_args"
+
+    def test_qualified_method_name_extracted(self):
+        funcs, _ = extract("""
+            bool Log::LogMessage::valid() {
+                return metadata != nullptr;
+            }
+        """)
+        fn = next((f for f in funcs if f.func_name != "unknown"), None)
+        assert fn is not None
+        assert fn.func_name == "valid"
+
+    def test_no_unknown_names_for_common_patterns(self):
+        """None of the common pointer-return patterns should produce 'unknown'."""
+        code = """
+            Node* find(Node* root) { return nullptr; }
+            const char* get_name() { return nullptr; }
+            int* allocate(int n) { return nullptr; }
+            bool* check(int x) { return nullptr; }
+        """
+        funcs, _ = extract(code)
+        unknown = [f for f in funcs if f.func_name == "unknown"]
+        assert len(unknown) == 0

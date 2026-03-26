@@ -997,55 +997,106 @@ def _cpp_preceding_comment(node, source_bytes: bytes) -> Optional[str]:
     return None
 
 
+def _cpp_find_function_declarator(func_node) -> Optional[object]:
+    """
+    Find the function_declarator node inside a function_definition.
+    Handles direct children and pointer/reference-wrapped declarators:
+      - void foo()            → function_declarator is direct child
+      - Node* foo()           → pointer_declarator → function_declarator
+      - const T& foo()        → reference_declarator → function_declarator
+      - T** foo()             → pointer_declarator → pointer_declarator → function_declarator
+    """
+    def _search(node, depth=0) -> Optional[object]:
+        if depth > 5:
+            return None
+        if node.type == "function_declarator":
+            return node
+        if node.type in ("pointer_declarator", "reference_declarator",
+                         "abstract_pointer_declarator"):
+            for child in node.children:
+                result = _search(child, depth + 1)
+                if result:
+                    return result
+        return None
+
+    for child in func_node.children:
+        result = _search(child)
+        if result:
+            return result
+    return None
+
+
+def _cpp_extract_name_from_declarator(decl_node, source_bytes: bytes) -> str:
+    """
+    Extract function name from a function_declarator node.
+    Handles: identifier, field_identifier, qualified_identifier, destructor_name.
+    """
+    for sub in decl_node.children:
+        if sub.type in ("identifier", "field_identifier"):
+            return _node_text(sub, source_bytes)
+        elif sub.type == "qualified_identifier":
+            # Walk to deepest identifier — e.g. Log::LogMessage::valid → 'valid'
+            def _last_id(n) -> Optional[str]:
+                for c in reversed(n.children):
+                    if c.type in ("identifier", "field_identifier"):
+                        return _node_text(c, source_bytes)
+                    elif c.type == "qualified_identifier":
+                        r = _last_id(c)
+                        if r:
+                            return r
+                return None
+            name = _last_id(sub)
+            if name:
+                return name
+        elif sub.type == "destructor_name":
+            return _node_text(sub, source_bytes)
+    return "unknown"
+
+
 def _cpp_function_name(func_node, source_bytes: bytes) -> str:
     """
     Extract function name from a function_definition node.
-    Handles plain identifiers, field_identifiers (methods inside classes),
-    and qualified names (e.g. Stack::pop).
+    Handles plain identifiers, field_identifiers, qualified names (Foo::bar),
+    pointer return types (Node* foo()), and reference return types (T& foo()).
     """
-    for child in func_node.children:
-        if child.type == "function_declarator":
-            for sub in child.children:
-                if sub.type in ("identifier", "field_identifier"):
-                    return _node_text(sub, source_bytes)
-                elif sub.type == "qualified_identifier":
-                    for part in reversed(sub.children):
-                        if part.type in ("identifier", "field_identifier"):
-                            return _node_text(part, source_bytes)
-                elif sub.type == "destructor_name":
-                    return _node_text(sub, source_bytes)
+    decl = _cpp_find_function_declarator(func_node)
+    if decl:
+        return _cpp_extract_name_from_declarator(decl, source_bytes)
     return "unknown"
 
 
 def _cpp_function_params(func_node, source_bytes: bytes) -> list[str]:
     """Extract parameter names from a function_definition node."""
     params = []
-    for child in func_node.children:
-        if child.type == "function_declarator":
-            for sub in child.children:
-                if sub.type == "parameter_list":
-                    for p in sub.children:
-                        if p.type == "parameter_declaration":
-                            # Last identifier in the declaration is the param name
-                            param_id = next(
-                                (c for c in reversed(p.children)
-                                 if c.type in ("identifier", "reference_declarator",
-                                               "pointer_declarator")),
-                                None,
-                            )
-                            if param_id:
-                                params.append(_node_text(param_id, source_bytes))
+    decl = _cpp_find_function_declarator(func_node)
+    if not decl:
+        return params
+    for sub in decl.children:
+        if sub.type == "parameter_list":
+            for p in sub.children:
+                if p.type == "parameter_declaration":
+                    # Last identifier in the declaration is the param name
+                    param_id = next(
+                        (c for c in reversed(p.children)
+                         if c.type in ("identifier", "reference_declarator",
+                                       "pointer_declarator")),
+                        None,
+                    )
+                    if param_id:
+                        params.append(_node_text(param_id, source_bytes))
     return params
 
 
 def _cpp_return_type(func_node, source_bytes: bytes) -> Optional[str]:
     """
     Extract return type from a function_definition node.
-    The return type is everything before the function_declarator.
+    Everything before the function_declarator (or pointer_declarator wrapping it).
     """
     parts = []
     for child in func_node.children:
-        if child.type == "function_declarator":
+        # Stop at the declarator chain — pointer_declarator wraps function_declarator
+        if child.type in ("function_declarator", "pointer_declarator",
+                          "reference_declarator"):
             break
         if child.type not in ("storage_class_specifier", "type_qualifier",
                                "virtual", "explicit", "inline", "static"):
