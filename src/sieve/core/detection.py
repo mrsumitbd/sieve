@@ -49,6 +49,12 @@ TEST_FILE_PATTERNS = {
         re.compile(r".*\.test\.ts$"),
         re.compile(r".*\.spec\.ts$"),
     ],
+    "C++": [
+        re.compile(r"^test_.*\.(cpp|cc|cxx)$"),
+        re.compile(r".*_test\.(cpp|cc|cxx)$"),
+        re.compile(r".*[Tt]est\.(cpp|cc|cxx)$"),
+        re.compile(r".*[Ss]pec\.(cpp|cc|cxx)$"),
+    ],
 }
 
 # Test runner config files (presence = test infrastructure exists)
@@ -57,14 +63,17 @@ TEST_CONFIG_FILES = {
     "Java": ["pom.xml", "build.gradle", "build.gradle.kts"],
     "JavaScript": ["jest.config.js", "jest.config.ts", "jest.config.json",
                    "karma.conf.js", "mocha.opts", ".mocharc.js", ".mocharc.yml"],
+    "C++": ["CMakeLists.txt", "CTestTestfile.cmake", "googletest.cmake",
+            "Makefile", "meson.build"],
 }
 
 # Keywords in CI files that indicate test execution
 CI_TEST_KEYWORDS = [
-    "pytest", "unittest", "nose", "tox",     # Python
-    "mvn test", "gradle test", "junit",       # Java
-    "jest", "mocha", "karma", "jasmine",      # JS
-    "npm test", "yarn test",                  # JS generic
+    "pytest", "unittest", "nose", "tox",         # Python
+    "mvn test", "gradle test", "junit",            # Java
+    "jest", "mocha", "karma", "jasmine",           # JS
+    "npm test", "yarn test",                       # JS generic
+    "ctest", "gtest", "googletest", "catch2",      # C++
     "run tests", "run_tests",
 ]
 

@@ -8,6 +8,7 @@ class Language(str, Enum):
     PYTHON = "Python"
     JAVA = "Java"
     JAVASCRIPT = "JavaScript"
+    CPP = "C++"
 
 
 class Granularity(str, Enum):

@@ -84,6 +84,9 @@ def _get_parser(language: str):
         elif language == "JavaScript":
             import tree_sitter_javascript as tsjavascript
             lang = TSLanguage(tsjavascript.language())
+        elif language == "C++":
+            import tree_sitter_cpp as tscpp
+            lang = TSLanguage(tscpp.language())
         else:
             raise ValueError(f"Unsupported language: {language}")
 
@@ -344,7 +347,9 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
     functions: list[FunctionRecord] = []
     classes: list[ClassRecord] = []
 
-    def walk(node, parent_class: Optional[str] = None, decorators: list[str] = None):
+    def walk(node, parent_class: Optional[str] = None, decorators: list[str] = None, _depth: int = 0):
+        if _depth > 200:
+            return
         if decorators is None:
             decorators = []
 
@@ -361,7 +366,7 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
                 None,
             )
             if inner:
-                walk(inner, parent_class=parent_class, decorators=dec_texts)
+                walk(inner, parent_class=parent_class, decorators=dec_texts, _depth=_depth + 1)
             return
 
         if node.type in ("function_definition", "async_function_definition"):
@@ -402,7 +407,7 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
             ))
 
             for child in node.children:
-                walk(child, parent_class)
+                walk(child, parent_class, _depth=_depth + 1)
 
         elif node.type == "class_definition":
             name_node = node.child_by_field_name("name")
@@ -461,10 +466,10 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
             for child in node.children:
                 if child.type == "block":
                     for item in child.children:
-                        walk(item, parent_class=class_name)
+                        walk(item, parent_class=class_name, _depth=_depth + 1)
         else:
             for child in node.children:
-                walk(child, parent_class)
+                walk(child, parent_class, _depth=_depth + 1)
 
     walk(root)
     return functions, classes
@@ -582,7 +587,9 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
     functions: list[FunctionRecord] = []
     classes: list[ClassRecord] = []
 
-    def walk(node, parent_class: Optional[str] = None):
+    def walk(node, parent_class: Optional[str] = None, _depth: int = 0):
+        if _depth > 200:
+            return
         if node.type == "class_declaration":
             # Class name
             name_node = next((c for c in node.children if c.type == "identifier"), None)
@@ -649,7 +656,7 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
             for child in node.children:
                 if child.type == "class_body":
                     for item in child.children:
-                        walk(item, parent_class=class_name)
+                        walk(item, parent_class=class_name, _depth=_depth + 1)
 
         elif node.type in ("method_declaration", "constructor_declaration"):
             name_node = next((c for c in node.children if c.type == "identifier"), None)
@@ -715,7 +722,7 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
 
         else:
             for child in node.children:
-                walk(child, parent_class)
+                walk(child, parent_class, _depth=_depth + 1)
 
     walk(root)
     return functions, classes
@@ -838,7 +845,9 @@ def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRe
     functions: list[FunctionRecord] = []
     classes: list[ClassRecord] = []
 
-    def walk(node, parent_class: Optional[str] = None):
+    def walk(node, parent_class: Optional[str] = None, _depth: int = 0):
+        if _depth > 200:
+            return
         if node.type == "class_declaration":
             name_node = next((c for c in node.children if c.type == "identifier"), None)
             class_name = _node_text(name_node, source_bytes) if name_node else "unknown"
@@ -890,7 +899,7 @@ def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRe
             for child in node.children:
                 if child.type == "class_body":
                     for item in child.children:
-                        walk(item, parent_class=class_name)
+                        walk(item, parent_class=class_name, _depth=_depth + 1)
 
         elif node.type == "function_declaration":
             name_node = next((c for c in node.children if c.type == "identifier"), None)
@@ -918,7 +927,7 @@ def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRe
 
         else:
             for child in node.children:
-                walk(child, parent_class)
+                walk(child, parent_class, _depth=_depth + 1)
 
     def _append_js_function(node, func_name: str, parent_class: Optional[str], is_arrow: bool = False):
         params = []
@@ -964,12 +973,295 @@ def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRe
     return functions, classes
 
 
+# ─── C++ Extraction ──────────────────────────────────────────────────────────
+
+def _cpp_preceding_comment(node, source_bytes: bytes) -> Optional[str]:
+    """
+    Return cleaned comment immediately preceding node, or None.
+    Handles both /** ... */ block comments and // line comments.
+    C++ uses the same sibling-comment convention as Java.
+    """
+    parent = node.parent
+    if not parent:
+        return None
+    siblings = list(parent.children)
+    idx = next((i for i, c in enumerate(siblings) if c == node), -1)
+    if idx > 0:
+        prev = siblings[idx - 1]
+        if prev.type == "comment":
+            raw = _node_text(prev, source_bytes).strip()
+            if raw.startswith("/**") or raw.startswith("/*"):
+                return _clean_block_comment(raw)
+            elif raw.startswith("//"):
+                return raw.lstrip("/").strip() or None
+    return None
+
+
+def _cpp_function_name(func_node, source_bytes: bytes) -> str:
+    """
+    Extract function name from a function_definition node.
+    Handles plain identifiers, field_identifiers (methods inside classes),
+    and qualified names (e.g. Stack::pop).
+    """
+    for child in func_node.children:
+        if child.type == "function_declarator":
+            for sub in child.children:
+                if sub.type in ("identifier", "field_identifier"):
+                    return _node_text(sub, source_bytes)
+                elif sub.type == "qualified_identifier":
+                    for part in reversed(sub.children):
+                        if part.type in ("identifier", "field_identifier"):
+                            return _node_text(part, source_bytes)
+                elif sub.type == "destructor_name":
+                    return _node_text(sub, source_bytes)
+    return "unknown"
+
+
+def _cpp_function_params(func_node, source_bytes: bytes) -> list[str]:
+    """Extract parameter names from a function_definition node."""
+    params = []
+    for child in func_node.children:
+        if child.type == "function_declarator":
+            for sub in child.children:
+                if sub.type == "parameter_list":
+                    for p in sub.children:
+                        if p.type == "parameter_declaration":
+                            # Last identifier in the declaration is the param name
+                            param_id = next(
+                                (c for c in reversed(p.children)
+                                 if c.type in ("identifier", "reference_declarator",
+                                               "pointer_declarator")),
+                                None,
+                            )
+                            if param_id:
+                                params.append(_node_text(param_id, source_bytes))
+    return params
+
+
+def _cpp_return_type(func_node, source_bytes: bytes) -> Optional[str]:
+    """
+    Extract return type from a function_definition node.
+    The return type is everything before the function_declarator.
+    """
+    parts = []
+    for child in func_node.children:
+        if child.type == "function_declarator":
+            break
+        if child.type not in ("storage_class_specifier", "type_qualifier",
+                               "virtual", "explicit", "inline", "static"):
+            text = _node_text(child, source_bytes).strip()
+            if text:
+                parts.append(text)
+    return " ".join(parts) if parts else None
+
+
+def _cpp_method_signature(func_node, source_bytes: bytes) -> str:
+    """
+    Reconstruct C++ method signature: everything up to (not including) the body.
+    Returns e.g. 'void push(int val)'.
+    """
+    parts = []
+    for child in func_node.children:
+        if child.type == "compound_statement":
+            break
+        parts.append(_node_text(child, source_bytes))
+    return " ".join(parts).strip()
+
+
+def _build_cpp_skeleton(class_node, source_bytes: bytes) -> str:
+    """
+    Build C++ class skeleton: class signature + method signatures + empty bodies.
+    """
+    lines = []
+
+    # Class signature: everything up to field_declaration_list
+    sig_parts = []
+    for child in class_node.children:
+        if child.type == "field_declaration_list":
+            break
+        sig_parts.append(_node_text(child, source_bytes))
+    lines.append(" ".join(sig_parts).strip() + " {")
+
+    # Class docstring
+    class_doc = _cpp_preceding_comment(class_node, source_bytes)
+    if class_doc:
+        lines.append(f"    /** {class_doc} */")
+
+    # Methods inside field_declaration_list
+    for child in class_node.children:
+        if child.type != "field_declaration_list":
+            continue
+        for item in child.children:
+            if item.type == "function_definition":
+                doc = _cpp_preceding_comment(item, source_bytes)
+                if doc:
+                    lines.append(f"    /** {doc} */")
+                sig = _cpp_method_signature(item, source_bytes)
+                lines.append(f"    {sig} {{ }}")
+                lines.append("")
+            elif item.type == "access_specifier":
+                # Preserve public:/private:/protected: labels
+                lines.append(_node_text(item, source_bytes) + ":")
+
+    lines.append("};")
+    return "\n".join(lines)
+
+
+def _collect_cpp_includes(root, source_bytes: bytes) -> list[tuple[str, list[str]]]:
+    """
+    Collect C++ #include directives.
+    Returns (statement_text, [header_stem]) tuples.
+    e.g. #include <vector> → ("...", ["vector"])
+         #include "mylib.h" → ("...", ["mylib"])
+    """
+    results = []
+    for node in root.children:
+        if node.type != "preproc_include":
+            continue
+        stmt_text = _node_text(node, source_bytes)
+        for child in node.children:
+            if child.type in ("system_lib_string", "string_literal"):
+                raw = _node_text(child, source_bytes).strip('<>"')
+                # e.g. "vector", "mylib.h" → stem without extension
+                stem = Path(raw).stem
+                if stem:
+                    results.append((stmt_text, [stem]))
+                break
+    return results
+
+
+def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionRecord], list[ClassRecord]]:
+    parser, _ = _get_parser("C++")
+    source_bytes = source.encode("utf-8")
+    tree = parser.parse(source_bytes)
+    root = tree.root_node
+
+    file_includes = _collect_cpp_includes(root, source_bytes)
+    functions: list[FunctionRecord] = []
+    classes: list[ClassRecord] = []
+
+    def walk(node, parent_class: Optional[str] = None, _depth: int = 0):
+        if _depth > 200:
+            return
+        if node.type == "class_specifier":
+            name_node = next(
+                (c for c in node.children if c.type == "type_identifier"), None
+            )
+            class_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+
+            # Base classes
+            parent_classes = []
+            for child in node.children:
+                if child.type == "base_class_clause":
+                    for sub in child.children:
+                        if sub.type == "type_identifier":
+                            parent_classes.append(_node_text(sub, source_bytes))
+
+            docstring = _cpp_preceding_comment(node, source_bytes)
+            source_code = _clean_indentation(_node_text(node, source_bytes))
+            skeleton = _build_cpp_skeleton(node, source_bytes)
+            used_imports = _filter_used_imports(file_includes, source_code)
+
+            # Methods
+            method_names = []
+            has_constructor = False
+            for child in node.children:
+                if child.type == "field_declaration_list":
+                    for item in child.children:
+                        if item.type == "function_definition":
+                            mname = _cpp_function_name(item, source_bytes)
+                            method_names.append(mname)
+                            if mname == class_name:
+                                has_constructor = True
+
+            classes.append(ClassRecord(
+                repo=repo,
+                file_path=file_path,
+                language="C++",
+                class_name=class_name,
+                parent_classes=parent_classes,
+                docstring=docstring,
+                source_code=source_code,
+                skeleton=skeleton,
+                used_imports=used_imports,
+                method_names=method_names,
+                method_count=len(method_names),
+                has_constructor=has_constructor,
+                decorators=[],
+                start_line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+            ))
+
+            # Walk into class body for methods
+            for child in node.children:
+                if child.type == "field_declaration_list":
+                    for item in child.children:
+                        walk(item, parent_class=class_name, _depth=_depth + 1)
+
+        elif node.type == "function_definition":
+            func_name = _cpp_function_name(node, source_bytes)
+
+            # Skip if this is a method we already walked via class body
+            # (parent_class is set when called from class walk above)
+            params = _cpp_function_params(node, source_bytes)
+            ret_annotation = _cpp_return_type(node, source_bytes)
+            docstring = _cpp_preceding_comment(node, source_bytes)
+            source_code = _clean_indentation(_node_text(node, source_bytes))
+
+            sig_line = _cpp_method_signature(node, source_bytes)
+            sig_parts = [sig_line + " { }"]
+            if docstring:
+                sig_parts = [f"/** {docstring} */", sig_line + " { }"]
+            signature = "\n".join(sig_parts)
+
+            used_imports = _filter_used_imports(file_includes, source_code)
+
+            functions.append(FunctionRecord(
+                repo=repo,
+                file_path=file_path,
+                language="C++",
+                func_name=func_name,
+                parameters=params,
+                return_annotation=ret_annotation,
+                docstring=docstring,
+                source_code=source_code,
+                signature=signature,
+                used_imports=used_imports,
+                start_line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+                is_method=parent_class is not None,
+                parent_class=parent_class,
+                decorators=[],
+            ))
+
+        elif node.type == "template_declaration":
+            # Templates wrap function_definition or class_specifier — walk into them
+            for child in node.children:
+                if child.type in ("function_definition", "class_specifier"):
+                    walk(child, parent_class, _depth=_depth + 1)
+
+        elif node.type == "namespace_definition":
+            # Walk into namespaces transparently
+            for child in node.children:
+                if child.type == "declaration_list":
+                    for item in child.children:
+                        walk(item, parent_class, _depth=_depth + 1)
+
+        else:
+            for child in node.children:
+                walk(child, parent_class, _depth=_depth + 1)
+
+    walk(root)
+    return functions, classes
+
+
 # ─── Public API ──────────────────────────────────────────────────────────────
 
 LANGUAGE_EXTENSIONS = {
     "Python": {".py"},
     "Java": {".java"},
     "JavaScript": {".js", ".ts", ".jsx", ".tsx"},
+    "C++": {".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx"},
 }
 
 
@@ -999,14 +1291,23 @@ def extract_from_file(
         logger.warning(f"Could not read {file_path}: {e}")
         return [], []
 
-    if language == "Python":
-        return _extract_python(source, stored_path, repo)
-    elif language == "Java":
-        return _extract_java(source, stored_path, repo)
-    elif language == "JavaScript":
-        return _extract_js(source, stored_path, repo)
-    else:
-        logger.warning(f"Extraction for {language} not yet implemented.")
+    try:
+        if language == "Python":
+            return _extract_python(source, stored_path, repo)
+        elif language == "Java":
+            return _extract_java(source, stored_path, repo)
+        elif language == "JavaScript":
+            return _extract_js(source, stored_path, repo)
+        elif language == "C++":
+            return _extract_cpp(source, stored_path, repo)
+        else:
+            logger.warning(f"Extraction for {language} not yet implemented.")
+            return [], []
+    except RecursionError:
+        logger.warning(f"Recursion limit hit parsing {file_path} — skipping file")
+        return [], []
+    except Exception as e:
+        logger.warning(f"Extraction failed for {file_path}: {e} — skipping file")
         return [], []
 
 
@@ -1050,6 +1351,10 @@ def extract_from_repo(
         if file_path.name.endswith(".test.js") or file_path.name.endswith(".spec.js"):
             continue
         if file_path.name.endswith(".test.ts") or file_path.name.endswith(".spec.ts"):
+            continue
+        if file_path.name.endswith("_test.cpp") or file_path.name.endswith("_test.cc"):
+            continue
+        if file_path.name.startswith("test_") and file_path.suffix in {".cpp", ".cc", ".h"}:
             continue
 
         funcs, classes = extract_from_file(

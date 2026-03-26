@@ -17,9 +17,12 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+
+load_dotenv()
 
 from sieve.config import SIEVEConfig, Language, Granularity, ExportFormat
 from sieve.pipeline import run_pipeline
