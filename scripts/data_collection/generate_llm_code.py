@@ -112,19 +112,27 @@ def generate_batch(
     batch_file = "batch_requests_tmp.jsonl"
     output_file = "batch_outputs_tmp.jsonl"
 
-    # Write JSONL request file
+    # Write JSONL request file — Together batch API uses completions format:
+    # {"custom_id": "...", "body": {"model": "...", "prompt": "...", "temperature": ...}}
     with open(batch_file, "w", encoding="utf-8") as f:
         for i, skeleton in enumerate(skeletons):
             user_prompt = user_tmpl.format(language=language, skeleton=skeleton)
+            # Together batch API uses prompt (completions style), not messages
+            prompt = (
+                f"{SYSTEM_PROMPTS[language]}\n\n"
+                f"User: {user_prompt}\n\n"
+                f"Assistant:"
+            )
             body = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": user_prompt},
-                ],
+                "model":       model,
+                "prompt":      prompt,
                 "temperature": temperature,
+                "max_tokens":  1024,
             }
-            f.write(json.dumps({"custom_id": f"req-{i}", "body": body}) + "\n")
+            f.write(json.dumps({
+                "custom_id": f"req-{i}",
+                "body":      body,
+            }) + "\n")
     logger.info(f"Wrote {len(skeletons)} requests to {batch_file}")
 
     # Upload
@@ -132,10 +140,10 @@ def generate_batch(
     file_id = file_resp.id
     logger.info(f"Uploaded batch file: {file_id}")
 
-    # Create batch
+    # Create batch — use completions endpoint to match prompt format
     batch = client.batches.create_batch(
         file_id=file_id,
-        endpoint="/v1/chat/completions",
+        endpoint="/v1/completions",
     )
     batch_id = batch.id
     logger.info(f"Created batch job: {batch_id}")
@@ -154,14 +162,18 @@ def generate_batch(
     # Retrieve output
     client.files.retrieve_content(id=output_file_id, output=output_file)
 
-    # Parse results
+    # Parse results — completions format uses choices[0]["text"]
     results: dict[str, str] = {}
     with open(output_file, "r") as f:
         for line in f:
             data = json.loads(line)
             if data["response"]["status_code"] == 200:
-                content = data["response"]["body"]["choices"][0]["message"]["content"]
-                results[data["custom_id"]] = content
+                body = data["response"]["body"]
+                # completions format
+                if "choices" in body and body["choices"]:
+                    choice = body["choices"][0]
+                    content = choice.get("text") or choice.get("message", {}).get("content", "")
+                    results[data["custom_id"]] = content
             else:
                 logger.warning(f"Request {data['custom_id']} failed: {data['response']['status_code']}")
 
@@ -227,9 +239,9 @@ def main():
     parser.add_argument("--granularity", required=True,
                         choices=["function", "class"],
                         help="Granularity level")
-    parser.add_argument("--mode",        default="auto",
+    parser.add_argument("--mode",        default="sequential",
                         choices=["auto", "batch", "sequential"],
-                        help="Generation mode (auto: batch if >500 rows, else sequential)")
+                        help="Generation mode (default: sequential)")
     parser.add_argument("--temperature", type=float, default=0.0,
                         help="Sampling temperature (default 0.0 for reproducibility)")
     parser.add_argument("--start",       type=int, default=0,

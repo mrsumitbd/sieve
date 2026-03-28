@@ -87,3 +87,13 @@ logs/
 .env
 *.pem
 *.key
+
+# Generated data — too large for git
+data/
+sieve_output/
+logs/
+htmlcov/
+
+# Temp files
+batch_requests_tmp.jsonl
+batch_outputs_tmp.jsonl

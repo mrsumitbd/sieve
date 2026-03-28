@@ -16,3 +16,4 @@ typer>=0.9.0
 rich>=13.7.0
 python-dotenv>=1.0.0
 autopep8>=2.0.4
+together==2.5.0
