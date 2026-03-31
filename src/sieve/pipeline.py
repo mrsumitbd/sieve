@@ -290,20 +290,16 @@ def run_pipeline(
 
     if config.annotate_llm_score:
         from sieve.models.classifier import LLMCodeClassifier
-        import os
 
         model_dir = Path(__file__).parent / "models" / "artifacts"
-        clf = LLMCodeClassifier(model_dir)
 
-        if not clf.is_available():
-            _progress(
-                "LLM score annotation skipped — model artifacts not found at "
-                f"{model_dir}. Copy trained weights:\n"
-                "  cp -r data/models/* src/sieve/models/artifacts/"
+        try:
+            _progress("Loading LLM classifier (downloading from HuggingFace Hub if needed)...")
+            clf = LLMCodeClassifier.load(
+                model_dir=model_dir,
+                hf_token=config.hf_token,
             )
-        else:
-            clf = LLMCodeClassifier.load(model_dir)
-            all_records = all_functions + all_classes  # type: ignore
+            all_records   = all_functions + all_classes  # type: ignore
             total_records = len(all_records)
             _progress(f"Scoring {total_records} records with LLM classifier...")
 
@@ -315,8 +311,8 @@ def run_pipeline(
 
             scored = sum(1 for s in scores if s is not None)
             _progress(f"LLM scoring complete — {scored}/{total_records} records scored.")
-
-    # ── Phase 6: Export ───────────────────────────────────────────────────────
+        except Exception as e:
+            _progress(f"LLM scoring failed — {e}. Continuing without scores.")
 
     _progress(
         f"Extraction complete — {len(all_functions)} functions, "

@@ -155,8 +155,8 @@ with st.sidebar:
         )
     )
     annotate_llm_score = st.toggle(
-        "Annotate LLM Score", value=False, disabled=True,
-        help="P(LLM-generated) per record — classifier coming in a future release."
+        "Annotate LLM Score", value=False,
+        help="Score each extracted snippet with P(AI-generated) using a fine-tuned CodeBERT classifier. Model weights are downloaded automatically on first use (~500MB)."
     )
 
     st.subheader("Processing")

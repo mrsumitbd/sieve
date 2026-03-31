@@ -4,10 +4,13 @@ sieve/models/classifier.py
 Wraps the fine-tuned CodeBERT classifier for use inside the SIEVE pipeline.
 Scores each extracted code snippet with P(AI-generated) → llm_score field.
 
+Model weights are hosted on HuggingFace Hub and downloaded automatically
+on first use, then cached locally.
+
 Usage:
     from sieve.models.classifier import LLMCodeClassifier
 
-    clf = LLMCodeClassifier.load()  # loads from default path
+    clf = LLMCodeClassifier.load()  # downloads from HF Hub if needed
     scores = clf.score_batch(["def foo(): ...", "public void bar() {}"])
 """
 
@@ -17,7 +20,10 @@ from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 
-# Default model artifacts location — relative to this file's parent (src/sieve/models/)
+# HuggingFace Hub repo containing model weights
+HF_REPO_ID = "mrahman2025/sieve-llm-classifier"
+
+# Default local cache location
 _DEFAULT_MODEL_DIR = Path(__file__).parent / "artifacts"
 
 
@@ -27,6 +33,9 @@ class LLMCodeClassifier:
 
     Wraps microsoft/codebert-base fine-tuned on 114K human/AI code pairs
     across Python, Java, JavaScript, and C++.
+
+    On first use, model weights are automatically downloaded from HuggingFace
+    Hub and cached locally.
     """
 
     def __init__(self, model_dir: Union[str, Path]):
@@ -39,34 +48,68 @@ class LLMCodeClassifier:
     # ── Loading ───────────────────────────────────────────────────────────────
 
     @classmethod
-    def load(cls, model_dir: Optional[Union[str, Path]] = None) -> "LLMCodeClassifier":
+    def load(
+        cls,
+        model_dir: Optional[Union[str, Path]] = None,
+        hf_token: Optional[str] = None,
+    ) -> "LLMCodeClassifier":
         """
-        Load classifier from model_dir (defaults to src/sieve/models/artifacts/).
-        Raises FileNotFoundError if artifacts are missing.
+        Load classifier. Resolution order:
+          1. Local artifacts at model_dir (or default artifacts/ dir)
+          2. Download from HuggingFace Hub (mrahman2025/sieve-llm-classifier)
+
+        Args:
+            model_dir: Optional local path to model artifacts directory.
+            hf_token:  Optional HuggingFace token for private repos.
         """
         if model_dir is None:
             model_dir = _DEFAULT_MODEL_DIR
 
         model_dir = Path(model_dir)
-        weights_path = model_dir / "best_model.pt"
-        tokenizer_path = model_dir / "tokenizer"
+        instance  = cls(model_dir)
 
-        if not weights_path.exists():
-            raise FileNotFoundError(
-                f"Model weights not found at {weights_path}.\n"
-                f"Run scripts/classifier/train.py first, then copy artifacts:\n"
-                f"  cp -r data/models/* src/sieve/models/artifacts/"
+        if not instance.is_available():
+            logger.info(
+                f"Local artifacts not found at {model_dir} — "
+                f"downloading from HuggingFace Hub ({HF_REPO_ID})..."
             )
-        if not tokenizer_path.exists():
-            raise FileNotFoundError(
-                f"Tokenizer not found at {tokenizer_path}.\n"
-                f"Run scripts/classifier/train.py first, then copy artifacts:\n"
-                f"  cp -r data/models/* src/sieve/models/artifacts/"
-            )
+            instance._download_from_hub(hf_token=hf_token)
 
-        instance = cls(model_dir)
         instance._load()
         return instance
+
+    def _download_from_hub(self, hf_token: Optional[str] = None):
+        """Download model artifacts from HuggingFace Hub to local model_dir."""
+        from huggingface_hub import hf_hub_download, snapshot_download
+
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+
+        # Download model weights
+        logger.info("Downloading best_model.pt from HuggingFace Hub...")
+        hf_hub_download(
+            repo_id=HF_REPO_ID,
+            filename="best_model.pt",
+            local_dir=str(self.model_dir),
+            token=hf_token,
+        )
+
+        # Download tokenizer files
+        logger.info("Downloading tokenizer from HuggingFace Hub...")
+        tokenizer_dir = self.model_dir / "tokenizer"
+        tokenizer_dir.mkdir(exist_ok=True)
+        for fname in ["tokenizer_config.json", "vocab.json", "merges.txt",
+                      "special_tokens_map.json", "config.json"]:
+            try:
+                hf_hub_download(
+                    repo_id=HF_REPO_ID,
+                    filename=f"tokenizer/{fname}",
+                    local_dir=str(self.model_dir),
+                    token=hf_token,
+                )
+            except Exception:
+                pass  # Not all tokenizer files may exist
+
+        logger.info(f"Artifacts downloaded to {self.model_dir}")
 
     def _load(self):
         """Lazy-load model and tokenizer onto device."""
@@ -183,7 +226,7 @@ class LLMCodeClassifier:
     # ── Convenience ───────────────────────────────────────────────────────────
 
     def is_available(self) -> bool:
-        """Check whether model artifacts exist without loading them."""
+        """Check whether local model artifacts exist (hub download not yet done)."""
         return (
             (self.model_dir / "best_model.pt").exists() and
             (self.model_dir / "tokenizer").exists()

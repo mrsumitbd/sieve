@@ -74,6 +74,7 @@ class SIEVEConfig(BaseModel):
 
     # --- GitHub ---
     github_token: Optional[str] = Field(default=None, description="GitHub PAT for higher rate limits")
+    hf_token: Optional[str] = Field(default=None, description="HuggingFace token for downloading model weights")
 
     @field_validator("granularity")
     @classmethod
