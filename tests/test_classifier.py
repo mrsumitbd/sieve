@@ -67,34 +67,43 @@ class TestIsAvailable:
 
 # ── load ──────────────────────────────────────────────────────────────────────
 
-class TestLoad:
-    def test_raises_when_weights_missing(self, tmp_path):
-        from sieve.models.classifier import LLMCodeClassifier
-        with pytest.raises(FileNotFoundError, match="best_model.pt"):
-            LLMCodeClassifier.load(tmp_path)
+# ── load ──────────────────────────────────────────────────────────────────────
 
-    def test_raises_when_tokenizer_missing(self, tmp_path):
-        (tmp_path / "best_model.pt").write_bytes(b"fake")
+class TestLoad:
+    def test_load_attempts_hub_when_artifacts_missing(self, tmp_path):
+        """When local artifacts missing, load() attempts hub download."""
         from sieve.models.classifier import LLMCodeClassifier
-        with pytest.raises(FileNotFoundError, match="tokenizer"):
-            LLMCodeClassifier.load(tmp_path)
+        with patch.object(LLMCodeClassifier, "_download_from_hub",
+                          side_effect=Exception("Hub unavailable")) as mock_dl:
+            with pytest.raises(Exception, match="Hub unavailable"):
+                LLMCodeClassifier.load(tmp_path)
+            mock_dl.assert_called_once()
+
+    def test_load_skips_hub_when_artifacts_present(self, tmp_path):
+        """When local artifacts exist, hub download is not called."""
+        from sieve.models.classifier import LLMCodeClassifier
+        clf = _make_classifier(tmp_path)  # creates tmp_path/artifacts/
+        artifacts_dir = tmp_path / "artifacts"
+        with patch.object(LLMCodeClassifier, "_download_from_hub") as mock_dl:
+            with patch.object(LLMCodeClassifier, "_load"):
+                LLMCodeClassifier.load(artifacts_dir)
+            mock_dl.assert_not_called()
 
     def test_load_calls_internal_load(self, tmp_path):
         clf = _make_classifier(tmp_path)
         with patch.object(clf, "_load") as mock_load:
-            # Patch is_available to return True so load proceeds
             with patch.object(clf, "is_available", return_value=True):
                 clf._load = mock_load
-                # Directly test that _load would be called on a fresh instance
                 mock_load.assert_not_called()
 
     def test_default_model_dir_used_when_none(self, tmp_path):
         from sieve.models.classifier import LLMCodeClassifier, _DEFAULT_MODEL_DIR
-        # Only test that load() uses the default dir — skip if artifacts happen to exist
         if (_DEFAULT_MODEL_DIR / "best_model.pt").exists():
-            pytest.skip("Artifacts exist locally — cannot test missing-artifact path")
-        with pytest.raises(FileNotFoundError):
-            LLMCodeClassifier.load()
+            pytest.skip("Artifacts exist locally — cannot test hub path")
+        with patch.object(LLMCodeClassifier, "_download_from_hub",
+                          side_effect=Exception("no hub in CI")):
+            with pytest.raises(Exception, match="no hub in CI"):
+                LLMCodeClassifier.load()
 
 
 # ── score ─────────────────────────────────────────────────────────────────────
