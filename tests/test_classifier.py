@@ -134,11 +134,11 @@ class TestScore:
 
 # ── score_batch ───────────────────────────────────────────────────────────────
 
+torch = pytest.importorskip("torch", reason="torch not installed — skipping score_batch tests")
+
 class TestScoreBatch:
     def _make_loaded_clf(self, tmp_path):
         """Create a classifier with mocked torch internals."""
-        import torch
-
         clf = _make_classifier(tmp_path)
         clf._loaded  = True
         clf._device  = torch.device("cpu")
@@ -174,7 +174,6 @@ class TestScoreBatch:
     def test_length_matches_input(self, tmp_path):
         clf = self._make_loaded_clf(tmp_path)
 
-        import torch
         clf._tokenizer.return_value = {
             "input_ids":      torch.zeros(3, 512, dtype=torch.long),
             "attention_mask": torch.ones(3, 512, dtype=torch.long),
@@ -188,7 +187,6 @@ class TestScoreBatch:
     def test_scores_are_floats_in_unit_interval(self, tmp_path):
         clf = self._make_loaded_clf(tmp_path)
 
-        import torch
         clf._tokenizer.return_value = {
             "input_ids":      torch.zeros(2, 512, dtype=torch.long),
             "attention_mask": torch.ones(2, 512, dtype=torch.long),
@@ -202,7 +200,6 @@ class TestScoreBatch:
     def test_mixed_empty_and_valid(self, tmp_path):
         clf = self._make_loaded_clf(tmp_path)
 
-        import torch
         clf._tokenizer.return_value = {
             "input_ids":      torch.zeros(1, 512, dtype=torch.long),
             "attention_mask": torch.ones(1, 512, dtype=torch.long),
@@ -216,7 +213,6 @@ class TestScoreBatch:
     def test_scores_are_rounded_to_4_decimal_places(self, tmp_path):
         clf = self._make_loaded_clf(tmp_path)
 
-        import torch
         clf._tokenizer.return_value = {
             "input_ids":      torch.zeros(1, 512, dtype=torch.long),
             "attention_mask": torch.ones(1, 512, dtype=torch.long),
