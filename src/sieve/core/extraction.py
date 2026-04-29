@@ -911,8 +911,8 @@ def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRe
             func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
             _append_js_function(node, func_name, parent_class)
 
-        elif node.type == "lexical_declaration":
-            # const arrowFunc = (x) => x * 2
+        elif node.type in ("lexical_declaration", "variable_declaration"):
+            # const/let/var arrowFunc = (x) => x * 2
             for child in node.children:
                 if child.type == "variable_declarator":
                     arrow = next(
@@ -943,10 +943,34 @@ def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRe
         docstring = _js_preceding_comment(node, source_bytes) if not is_arrow else None
         source_code = _clean_indentation(_node_text(node, source_bytes))
 
-        sig_line = _js_method_signature(node, source_bytes) if not is_arrow else f"{func_name} = {_node_text(node, source_bytes).split('{')[0].strip()}"
-        sig_parts = [sig_line + " { }"]
+        if is_arrow:
+            # For arrow functions, source_code should include the full assignment
+            # Walk up to the lexical/variable declaration to get `const f = (x) => ...`
+            decl = node.parent  # variable_declarator
+            if decl and decl.type == "variable_declarator":
+                lex = decl.parent  # lexical_declaration or variable_declaration
+                if lex and lex.type in ("lexical_declaration", "variable_declaration"):
+                    source_code = _clean_indentation(_node_text(lex, source_bytes))
+
+            # Build signature — detect if arrow body is a block or expression
+            arrow_text = _node_text(node, source_bytes)
+            has_block_body = any(c.type == "statement_block" for c in node.children)
+
+            if has_block_body:
+                # Block body: const f = (x) => { ... } → signature ends with { }
+                arrow_prefix = arrow_text.split("{")[0].rstrip()
+                sig_line = f"{func_name} = {arrow_prefix} {{ }}"
+            else:
+                # Expression body: const f = (x) => x * 2 → keep as-is, no { }
+                sig_line = f"{func_name} = {arrow_text}"
+
+            sig_parts = [sig_line]
+        else:
+            sig_line = _js_method_signature(node, source_bytes)
+            sig_parts = [sig_line + " { }"]
+
         if docstring:
-            sig_parts = [f"/** {docstring} */", sig_line + " { }"]
+            sig_parts = [f"/** {docstring} */"] + sig_parts
         signature = "\n".join(sig_parts)
 
         used_imports = _filter_used_imports(file_imports, source_code)
@@ -1341,6 +1365,24 @@ def extract_from_file(
     except Exception as e:
         logger.warning(f"Could not read {file_path}: {e}")
         return [], []
+
+    # ── Minification filter (JS only) ─────────────────────────────────────────
+    # Skip minified/bundled JS files — they produce garbage extractions.
+    # Heuristics: any single line > 1000 chars, or average line length > 300.
+    if language == "JavaScript":
+        fp = stored_path.lower()
+        # Skip by filename
+        if fp.endswith(".min.js") or "node_modules" in fp:
+            logger.debug(f"Skipping minified/vendor JS: {stored_path}")
+            return [], []
+        # Skip by content — minified files have very long lines
+        lines = source.splitlines()
+        if lines:
+            max_line = max((len(l) for l in lines), default=0)
+            avg_line = sum(len(l) for l in lines) / len(lines)
+            if max_line > 1000 or avg_line > 300:
+                logger.debug(f"Skipping minified JS (max_line={max_line}, avg={avg_line:.0f}): {stored_path}")
+                return [], []
 
     try:
         if language == "Python":
