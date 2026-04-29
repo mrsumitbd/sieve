@@ -97,3 +97,5 @@ htmlcov/
 # Temp files
 batch_requests_tmp.jsonl
 batch_outputs_tmp.jsonl
+src/sieve/models/artifacts/best_model.pt
+src/sieve/models/artifacts/tokenizer/
