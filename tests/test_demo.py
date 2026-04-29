@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from sieve.ui.app import load_demo_dataset
+from sieve.ui.Home import load_demo_dataset
 
 
 @pytest.fixture(scope="module")
