@@ -94,18 +94,6 @@ st.caption("**S**oftware **I**ngestion & **E**xtraction for **V**erifiable **E**
 st.markdown("Curate contamination-aware code corpora from GitHub for SE research.")
 st.divider()
 
-# ─── cloc check ──────────────────────────────────────────────────────────────
-
-if not check_cloc():
-    with st.expander("⚠️ cloc not found — click to see installation instructions"):
-        st.warning(
-            "**cloc is not installed or not on your PATH.** "
-            "cloc is recommended for accurate LOC and comment counting "
-            "when using the Engineered Projects filter. Without it, SIEVE falls "
-            "back to an AST-based counter."
-        )
-        st.code(CLOC_INSTALL_INSTRUCTIONS, language="bash")
-
 # ─── Sidebar: Parameter Form ─────────────────────────────────────────────────
 
 with st.sidebar:
@@ -161,6 +149,13 @@ with st.sidebar:
             "and bottom-Q1 repos. Slower but higher-quality corpus."
         ),
     )
+
+    if engineered_only and not check_cloc():
+        st.warning(
+            "⚠️ **cloc not found.** SIEVE will fall back to an AST-based LOC "
+            "counter. For best results, install cloc before running with this filter.",
+            icon="⚠️",
+        )
     annotate_llm_score = st.toggle(
         "Annotate LLM Score", value=False,
         help=(
