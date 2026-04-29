@@ -269,9 +269,9 @@ df = pd.read_json("sieve_output/functions.jsonl", lines=True)
 
 st.divider()
 
-# ─── FAQ ──────────────────────────────────────────────────────────────────────
+# ─── Technical Notes ──────────────────────────────────────────────────────────
 
-st.header("FAQ")
+st.header("Technical Notes")
 
 with st.expander("Why do some repos yield 0 functions and 0 classes?"):
     st.markdown("""
@@ -359,8 +359,8 @@ with st.expander("What GitHub API rate limits should I expect?"):
 
 with st.expander("Which languages are supported?"):
     st.markdown("""
-    **Python, Java, and JavaScript** are all fully supported for function and class extraction.
-    All three use tree-sitter grammars under the hood.
+    **Python, Java, JavaScript, and C++** are all fully supported for function and class
+    extraction. All four use tree-sitter grammars under the hood.
 
     **Python** extracts `function_definition` and `class_definition` nodes, including
     async functions, decorators (`@staticmethod`, `@dataclass`, etc.), type annotations,
@@ -371,12 +371,17 @@ with st.expander("Which languages are supported?"):
     generic type parameters, and `extends`/`implements` relationships.
 
     **JavaScript** extracts `function_declaration`, `method_definition`, `class_declaration`,
-    and arrow functions assigned to `const`. Handles default imports, named imports, and
-    namespace imports (`import * as`). TypeScript (`.ts`, `.tsx`) files are processed using
-    the JavaScript grammar — type annotations are preserved in parameter strings but not
+    and arrow functions assigned to `const`/`let`/`var`. Handles default imports, named
+    imports, and namespace imports (`import * as`). Minified and bundled files are
+    automatically skipped. TypeScript (`.ts`, `.tsx`) files are processed using the
+    JavaScript grammar — type annotations are preserved in parameter strings but not
     separately parsed.
 
-    Discovery and repository filtering support all three languages at the GitHub search level.
+    **C++** extracts free functions and class methods, including pointer/reference return
+    types, template functions, namespace-qualified names, and qualified method names
+    (e.g. `Log::LogMessage::valid`). Uses `#include` detection for used imports.
+
+    Discovery and repository filtering support all four languages at the GitHub search level.
     """)
 
 with st.expander("How is 'used imports' different from all imports in the file?"):
@@ -394,13 +399,16 @@ with st.expander("How is 'used imports' different from all imports in the file?"
 
 with st.expander("What is the LLM Score field?"):
     st.markdown("""
-    `llm_score` is a reserved field for a future classifier that will estimate the
-    probability that a given function or class was written by an LLM rather than a human.
-    It is currently `null` for all records.
+    `llm_score` is P(AI-generated) for the extracted snippet — a probability in [0, 1]
+    produced by a fine-tuned [CodeBERT](https://huggingface.co/microsoft/codebert-base)
+    classifier integrated directly into SIEVE.
 
-    The planned classifier will be trained on the CodeProbe dataset using gradient-boosted
-    trees over 72 interpretable code features, with DeepSHAP for explainability. When
-    ready, it will be integrated via `sieve/models/classifier.py`.
+    Enable it via the **Annotate LLM Score** toggle before running. The classifier weights
+    (~500MB) are downloaded automatically from HuggingFace Hub on first use.
+
+    See the **About the Classifier** page for full details on training data, architecture,
+    and performance metrics (F1=0.9478, AUROC=0.9902 on a held-out test set of 11,419
+    samples across Python, Java, JavaScript, and C++).
     """)
 
 st.divider()
