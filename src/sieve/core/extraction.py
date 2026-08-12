@@ -179,11 +179,11 @@ def _build_python_skeleton(class_node, source_bytes: bytes) -> str:
     for child in class_node.children:
         if child.type == "block":
             for item in child.children:
-                if item.type in ("function_definition", "decorated_definition"):
+                if item.type in ("function_definition", "async_function_definition", "decorated_definition"):
                     func_node = item
                     if item.type == "decorated_definition":
                         for sub in item.children:
-                            if sub.type == "function_definition":
+                            if sub.type in ("function_definition", "async_function_definition"):
                                 func_node = sub
                                 break
                         # Include decorators in skeleton
@@ -199,7 +199,7 @@ def _build_python_skeleton(class_node, source_bytes: bytes) -> str:
                     func_name_str = _node_text(name_node, source_bytes) if name_node else "unknown"
                     params_str = _node_text(params_node, source_bytes) if params_node else "()"
                     ret_str = f" -> {_node_text(ret_node, source_bytes)}" if ret_node else ""
-                    is_async = func_node.type == "async_function_definition"
+                    is_async = any(c.type == "async" for c in func_node.children)
                     prefix = "async def " if is_async else "def "
                     func_sig = f"{prefix}{func_name_str}{params_str}{ret_str}:"
                     lines.append(f"    {func_sig.lstrip()}")
@@ -234,7 +234,9 @@ def _build_python_function_signature(func_node, source_bytes: bytes) -> str:
     func_name_str = _node_text(name_node, source_bytes) if name_node else "unknown"
     params_str = _node_text(params_node, source_bytes) if params_node else "()"
     ret_str = f" -> {_node_text(ret_node, source_bytes)}" if ret_node else ""
-    is_async = func_node.type == "async_function_definition"
+    is_async = func_node.type == "async_function_definition" or any(
+        c.type == "async" for c in func_node.children
+    )
     prefix = "async def " if is_async else "def "
     sig_line = f"{prefix}{func_name_str}{params_str}{ret_str}:"
 
