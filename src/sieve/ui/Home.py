@@ -506,18 +506,40 @@ if st.session_state.summary:
                     return code
 
                 if rtype == "Function":
-                    tab1, tab2 = st.tabs(["Full Source", "Signature"])
+                    tab1, tab2, tab3 = st.tabs(["Full Source", "Signature", "AST"])
                     with tab1:
                         st.code(_with_imports(record.get("source_code", "")), language=syntax_lang)
                     with tab2:
                         st.code(_with_imports(record.get("signature", "")), language=syntax_lang)
+                    with tab3:
+                        from sieve.ui.ast_viz import build_ast_json, render_ast_component
+                        ast_json = build_ast_json(record.get("source_code", ""), rec_lang)
+                        if ast_json:
+                            st.components.v1.html(
+                                render_ast_component(ast_json, height=520),
+                                height=520,
+                                scrolling=False,
+                            )
+                        else:
+                            st.warning("AST could not be generated for this snippet.")
 
                 elif rtype == "Class":
-                    tab1, tab2 = st.tabs(["Full Source", "Skeleton"])
+                    tab1, tab2, tab3 = st.tabs(["Full Source", "Skeleton", "AST"])
                     with tab1:
                         st.code(_with_imports(record.get("source_code", "")), language=syntax_lang)
                     with tab2:
                         st.code(_with_imports(record.get("skeleton", "")), language=syntax_lang)
+                    with tab3:
+                        from sieve.ui.ast_viz import build_ast_json, render_ast_component
+                        ast_json = build_ast_json(record.get("source_code", ""), rec_lang)
+                        if ast_json:
+                            st.components.v1.html(
+                                render_ast_component(ast_json, height=520),
+                                height=520,
+                                scrolling=False,
+                            )
+                        else:
+                            st.warning("AST could not be generated for this snippet.")
     else:
         st.info("No JSONL output files found. Run the pipeline or load the example dataset.")
 
