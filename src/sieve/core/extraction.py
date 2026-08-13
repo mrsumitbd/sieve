@@ -39,7 +39,11 @@ class FunctionRecord:
     is_method: bool           # True if inside a class
     parent_class: Optional[str]
     decorators: list[str]
-    llm_score: Optional[float] = None   # P(LLM-generated) — populated by classifier (future)
+    llm_score: Optional[float] = None   # P(LLM-generated) — populated by classifier
+    ast_depth: Optional[int] = None     # Max depth of the parse tree
+    ast_num_nodes: Optional[int] = None # Total node count
+    ast_node_types: Optional[dict] = None  # Node type → count
+    ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
 
 
 @dataclass
@@ -60,12 +64,17 @@ class ClassRecord:
     decorators: list[str]
     start_line: int
     end_line: int
-    llm_score: Optional[float] = None   # P(LLM-generated) — populated by classifier (future)
+    llm_score: Optional[float] = None   # P(LLM-generated) — populated by classifier
+    ast_depth: Optional[int] = None     # Max depth of the parse tree
+    ast_num_nodes: Optional[int] = None # Total node count
+    ast_node_types: Optional[dict] = None  # Node type → count
+    ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
 
 
 # ─── Tree-sitter Setup ───────────────────────────────────────────────────────
 
 _PARSERS: dict = {}
+
 
 def _get_parser(language: str):
     """Lazy-load and cache tree-sitter parsers per language."""
@@ -105,6 +114,71 @@ def _get_parser(language: str):
 
 def _node_text(node, source_bytes: bytes) -> str:
     return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+
+
+def _node_to_ast_dict(node, source_bytes: bytes, max_depth: int, depth: int = 0) -> dict:
+    """Recursively convert a tree-sitter node to a JSON-serializable dict."""
+    is_leaf = len(node.children) == 0
+    text = node.text.decode("utf-8", errors="replace") if is_leaf else None
+    if text and len(text) > 80:
+        text = text[:77] + "..."
+    result = {
+        "type":     node.type,
+        "text":     text,
+        "children": [],
+    }
+    if depth < max_depth:
+        for child in node.children:
+            result["children"].append(
+                _node_to_ast_dict(child, source_bytes, max_depth, depth + 1)
+            )
+    return result
+
+
+def _compute_ast_features(
+    source: str,
+    language: str,
+    include_full_ast: bool = False,
+) -> tuple[Optional[int], Optional[int], Optional[dict], Optional[dict]]:
+    """
+    Parse source code and return AST-derived features.
+
+    Returns:
+        (ast_depth, ast_num_nodes, ast_node_types, ast_json)
+        ast_json is None unless include_full_ast=True
+    """
+    try:
+        source_bytes = source.encode("utf-8")
+        result = _get_parser(language)
+        if result is None:
+            return None, None, None, None
+        parser, _ = result
+        tree = parser.parse(source_bytes)
+        root = tree.root_node
+
+        depth_counter = [0]
+        node_types: dict[str, int] = {}
+        num_nodes = [0]
+
+        def _walk(node, depth):
+            num_nodes[0] += 1
+            if depth > depth_counter[0]:
+                depth_counter[0] = depth
+            nt = node.type
+            node_types[nt] = node_types.get(nt, 0) + 1
+            for child in node.children:
+                _walk(child, depth + 1)
+
+        _walk(root, 0)
+
+        ast_json = None
+        if include_full_ast:
+            ast_json = _node_to_ast_dict(root, source_bytes, max_depth=999)
+
+        return depth_counter[0], num_nodes[0], node_types, ast_json
+
+    except Exception:
+        return None, None, None, None
 
 
 def _clean_indentation(snippet: str) -> str:
@@ -1347,16 +1421,21 @@ def extract_from_file(
     language: str,
     repo: str,
     relative_path: str = None,
+    include_ast: bool = False,
 ) -> tuple[list[FunctionRecord], list[ClassRecord]]:
     """
     Extract function and class records from a single source file.
 
     Args:
-        file_path: Absolute path to the file (used for reading)
-        language: Target language
-        repo: Repo name (e.g. "owner/repo")
+        file_path:    Absolute path to the file (used for reading)
+        language:     Target language
+        repo:         Repo name (e.g. "owner/repo")
         relative_path: Path relative to repo root stored in records.
                        Falls back to file_path if not provided.
+        include_ast:  If True, populate ast_depth, ast_num_nodes,
+                      ast_node_types, and full ast JSON on every record.
+                      If False, only ast_depth, ast_num_nodes, ast_node_types
+                      are populated (full ast stays None).
 
     Returns:
         (functions, classes) — lists of records extracted from this file
@@ -1369,15 +1448,11 @@ def extract_from_file(
         return [], []
 
     # ── Minification filter (JS only) ─────────────────────────────────────────
-    # Skip minified/bundled JS files — they produce garbage extractions.
-    # Heuristics: any single line > 1000 chars, or average line length > 300.
     if language == "JavaScript":
         fp = stored_path.lower()
-        # Skip by filename
         if fp.endswith(".min.js") or "node_modules" in fp:
             logger.debug(f"Skipping minified/vendor JS: {stored_path}")
             return [], []
-        # Skip by content — minified files have very long lines
         lines = source.splitlines()
         if lines:
             max_line = max((len(l) for l in lines), default=0)
@@ -1388,13 +1463,13 @@ def extract_from_file(
 
     try:
         if language == "Python":
-            return _extract_python(source, stored_path, repo)
+            functions, classes = _extract_python(source, stored_path, repo)
         elif language == "Java":
-            return _extract_java(source, stored_path, repo)
+            functions, classes = _extract_java(source, stored_path, repo)
         elif language == "JavaScript":
-            return _extract_js(source, stored_path, repo)
+            functions, classes = _extract_js(source, stored_path, repo)
         elif language == "C++":
-            return _extract_cpp(source, stored_path, repo)
+            functions, classes = _extract_cpp(source, stored_path, repo)
         else:
             logger.warning(f"Extraction for {language} not yet implemented.")
             return [], []
@@ -1405,21 +1480,35 @@ def extract_from_file(
         logger.warning(f"Extraction failed for {file_path}: {e} — skipping file")
         return [], []
 
+    # ── AST feature annotation ────────────────────────────────────────────────
+    for record in functions + classes:
+        depth, num_nodes, node_types, ast_json = _compute_ast_features(
+            record.source_code, language, include_full_ast=include_ast
+        )
+        record.ast_depth      = depth
+        record.ast_num_nodes  = num_nodes
+        record.ast_node_types = node_types
+        record.ast            = ast_json
+
+    return functions, classes
+
 
 def extract_from_repo(
     repo_path: str,
     language: str,
     repo_name: str,
     granularities: list[str],
+    include_ast: bool = False,
 ) -> tuple[list[FunctionRecord], list[ClassRecord]]:
     """
     Walk a cloned repo and extract all matching source files.
 
     Args:
-        repo_path: Absolute path to cloned repo
-        language: Target language
-        repo_name: Full repo name (e.g. "owner/repo")
+        repo_path:    Absolute path to cloned repo
+        language:     Target language
+        repo_name:    Full repo name (e.g. "owner/repo")
         granularities: List of granularity strings from config
+        include_ast:  If True, populate full AST JSON on every record
 
     Returns:
         (all_functions, all_classes) across the entire repo
@@ -1457,6 +1546,7 @@ def extract_from_repo(
             language,
             repo_name,
             relative_path=str(file_path.relative_to(root)),
+            include_ast=include_ast,
         )
 
         if "function" in granularities:

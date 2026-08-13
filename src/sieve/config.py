@@ -63,6 +63,10 @@ class SIEVEConfig(BaseModel):
         default=False,
         description="Annotate each record with P(LLM-generated). Requires classifier to be built first."
     )
+    export_ast: bool = Field(
+        default=False,
+        description="Include full AST JSON in each exported record (increases file size significantly)"
+    )
 
     # --- Deduplication ---
     deduplicate: bool = Field(default=True, description="Apply MinHash near-duplicate removal")

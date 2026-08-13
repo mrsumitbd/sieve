@@ -164,6 +164,19 @@ with st.sidebar:
             "HuggingFace Hub automatically on first use."
         ),
     )
+    export_ast = st.toggle(
+        "Export AST", value=False,
+        help=(
+            "Include AST-derived features (depth, node count, node type distribution) "
+            "in every exported record. Enable 'Full AST JSON' to also include the "
+            "complete parse tree — significantly increases file size."
+        ),
+    )
+    export_full_ast = st.toggle(
+        "Full AST JSON (opt-in)", value=False,
+        disabled=not export_ast,
+        help="Include the complete AST as nested JSON in each record. Only available when Export AST is enabled.",
+    ) if export_ast else False
 
     st.subheader("Processing")
     deduplicate_flag = st.toggle("Deduplicate", value=True)
@@ -234,6 +247,7 @@ if run_button:
                 require_tests=require_tests,
                 engineered_only=engineered_only,
                 annotate_llm_score=annotate_llm_score,
+                export_ast=export_full_ast if export_ast else False,
                 deduplicate=deduplicate_flag,
                 dedup_threshold=dedup_threshold,
                 output_dir=tmp_dir,

@@ -86,6 +86,7 @@ def _process_repo(
                 language=config.language,
                 repo_name=repo_name,
                 granularities=config.granularity,
+                include_ast=config.export_ast,
             )
 
             # Build metadata dict
@@ -286,33 +287,21 @@ def run_pipeline(
         )
         all_classes = _stratified_sample(all_classes, config.max_classes)
 
-    # ── Phase 5: LLM score annotation ────────────────────────────────────────
+    # ── Phase 5: LLM score annotation (future) ───────────────────────────────
 
     if config.annotate_llm_score:
-        from sieve.models.classifier import LLMCodeClassifier
+        _progress(
+            "LLM score annotation requested — classifier not yet built. "
+            "Scores will remain null. See sieve/models/ when ready."
+        )
+        # Placeholder — llm_score fields remain None on all records.
+        # When the classifier is ready:
+        #   from sieve.models.classifier import LLMCodeClassifier
+        #   clf = LLMCodeClassifier.load("sieve/models/llm_classifier.joblib")
+        #   for record in all_functions + all_classes:
+        #       record.llm_score = clf.score(record.source_code)
 
-        model_dir = Path(__file__).parent / "models" / "artifacts"
-
-        try:
-            _progress("Loading LLM classifier (downloading from HuggingFace Hub if needed)...")
-            clf = LLMCodeClassifier.load(
-                model_dir=model_dir,
-                hf_token=config.hf_token,
-            )
-            all_records   = all_functions + all_classes  # type: ignore
-            total_records = len(all_records)
-            _progress(f"Scoring {total_records} records with LLM classifier...")
-
-            snippets = [r.source_code for r in all_records]
-            scores   = clf.score_batch(snippets, batch_size=64)
-
-            for record, score in zip(all_records, scores):
-                record.llm_score = score
-
-            scored = sum(1 for s in scores if s is not None)
-            _progress(f"LLM scoring complete — {scored}/{total_records} records scored.")
-        except Exception as e:
-            _progress(f"LLM scoring failed — {e}. Continuing without scores.")
+    # ── Phase 6: Export ───────────────────────────────────────────────────────
 
     _progress(
         f"Extraction complete — {len(all_functions)} functions, "
