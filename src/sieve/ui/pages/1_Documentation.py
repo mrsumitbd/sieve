@@ -68,8 +68,7 @@ st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
 | **Granularity** | Choose to extract functions, classes, or both. |
-| **Require Test Suite** | Only include repos where a test suite is detected. Detection uses four signals: test directory names, test file naming patterns, test runner config files (e.g. `pytest.ini`), and CI workflow files. A test suite is considered present if ≥ 2 signals fire. |
-| **Engineered Projects Only** | Applies the Xiao et al. (2025) / Munaiah et al. (2017) filter — see section below. |
+| **Engineered Projects Only** | Applies the Munaiah et al. (2017) filter — see section below. Includes test suite presence as one of its signals. |
 """)
 
 st.subheader("Deduplication")

@@ -137,10 +137,6 @@ with st.sidebar:
         options=[g.value for g in Granularity],
         default=["function", "class"],
     )
-    require_tests = st.toggle(
-        "Require Test Suite", value=False,
-        help="Only include repos where a test suite is detected.",
-    )
     engineered_only = st.toggle(
         "Engineered Projects Only", value=False,
         help=(
@@ -179,7 +175,7 @@ with st.sidebar:
     ) if export_ast else False
 
     st.subheader("Processing")
-    deduplicate_flag = st.toggle("Deduplicate", value=True)
+    deduplicate_flag = st.toggle("Deduplicate", value=False)
     dedup_threshold  = st.slider(
         "Dedup Similarity Threshold",
         min_value=0.5, max_value=1.0, value=0.8, step=0.05,
@@ -244,7 +240,6 @@ if run_button:
                 max_functions=int(max_functions) if max_functions > 0 else None,
                 max_classes=int(max_classes)   if max_classes   > 0 else None,
                 granularity=granularity,
-                require_tests=require_tests,
                 engineered_only=engineered_only,
                 annotate_llm_score=annotate_llm_score,
                 export_ast=export_full_ast if export_ast else False,
@@ -589,7 +584,6 @@ with st.expander("📋 Current Configuration (JSON)"):
             "max_functions":    int(max_functions)   if max_functions   > 0 else None,
             "max_classes":      int(max_classes)     if max_classes     > 0 else None,
             "granularity":      granularity,
-            "require_tests":    require_tests,
             "engineered_only":  engineered_only,
             "annotate_llm_score": annotate_llm_score,
             "deduplicate":      deduplicate_flag,

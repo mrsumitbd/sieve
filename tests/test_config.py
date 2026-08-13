@@ -51,17 +51,13 @@ class TestDefaults:
 
     def test_dedup_on_by_default(self):
         cfg = SIEVEConfig(language="Python", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1))
-        assert cfg.deduplicate is True
+        assert cfg.deduplicate is False
 
     def test_caps_default_to_none(self):
         cfg = SIEVEConfig(language="Python", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1))
         assert cfg.max_repos is None
         assert cfg.max_functions is None
         assert cfg.max_classes is None
-
-    def test_require_tests_off_by_default(self):
-        cfg = SIEVEConfig(language="Python", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1))
-        assert cfg.require_tests is False
 
     def test_engineered_only_off_by_default(self):
         cfg = SIEVEConfig(language="Python", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1))

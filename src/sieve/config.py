@@ -48,7 +48,6 @@ class SIEVEConfig(BaseModel):
         default=[Granularity.FUNCTION, Granularity.CLASS],
         description="Extraction granularity levels"
     )
-    require_tests: bool = Field(default=False, description="Only include repos with detectable test suites")
     engineered_only: bool = Field(
         default=False,
         description=(
@@ -69,7 +68,7 @@ class SIEVEConfig(BaseModel):
     )
 
     # --- Deduplication ---
-    deduplicate: bool = Field(default=True, description="Apply MinHash near-duplicate removal")
+    deduplicate: bool = Field(default=False, description="Apply MinHash near-duplicate removal")
     dedup_threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="Jaccard similarity threshold for dedup")
 
     # --- Output ---

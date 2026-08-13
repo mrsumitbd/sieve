@@ -149,46 +149,6 @@ class TestPipelineOutputFiles:
         assert manifest["summary"]["total_classes"] == summary["total_classes"]
 
 
-class TestPipelineRequireTests:
-    def test_require_tests_passes_with_test_suite(self, tmp_path, synthetic_repo):
-        config = SIEVEConfig(
-            language="Python",
-            start_date=date(2024, 1, 1),
-            end_date=date(2025, 1, 1),
-            require_tests=True,
-            deduplicate=False,
-            output_dir=str(tmp_path / "out"),
-        )
-        summary = _run_with_fake_repo(config, synthetic_repo)
-        # synthetic_repo has tests — should be processed
-        assert summary["total_repos_processed"] == 1
-
-    def test_require_tests_skips_repo_without_tests(self, tmp_path, tmp_repo):
-        # A repo with no test infrastructure
-        no_test_repo = tmp_repo({"src/app.py": "def run(): pass\n"})
-
-        config = SIEVEConfig(
-            language="Python",
-            start_date=date(2024, 1, 1),
-            end_date=date(2025, 1, 1),
-            require_tests=True,
-            deduplicate=False,
-            output_dir=str(tmp_path / "out"),
-        )
-        meta = _make_repo_meta()
-
-        def fake_clone(repo_full_name, target_dir):
-            shutil.copytree(str(no_test_repo), target_dir, dirs_exist_ok=True)
-            return True
-
-        with patch("sieve.pipeline.discover_repos", return_value=iter([meta])), \
-             patch("sieve.pipeline._clone_repo", side_effect=fake_clone):
-            summary = run_pipeline(config)
-
-        assert summary["total_functions"] == 0
-        assert summary["total_classes"] == 0
-
-
 class TestPipelineDeduplication:
     def test_dedup_reduces_count(self, tmp_path, synthetic_repo):
         """Duplicate files across two fake repos should be deduplicated."""

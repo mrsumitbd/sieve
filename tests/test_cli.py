@@ -179,14 +179,12 @@ class TestRunCommand:
                 "--language", "Java",
                 "--start-date", "2024-01-01",
                 "--end-date", "2025-01-01",
-                "--require-tests",
                 "--max-repos", "10",
                 "--export-format", "parquet",
             ])
         assert result.exit_code == 0
         cfg = mock.call_args[0][0]
         assert cfg.language == "Java"
-        assert cfg.require_tests is True
         assert cfg.max_repos == 10
         assert cfg.export_format == "parquet"
 
