@@ -67,27 +67,24 @@ class TestIsAvailable:
 
 # ── load ──────────────────────────────────────────────────────────────────────
 
-# ── load ──────────────────────────────────────────────────────────────────────
-
 class TestLoad:
     def test_load_attempts_hub_when_artifacts_missing(self, tmp_path):
-        """When local artifacts missing, load() attempts hub download."""
+        """When local artifacts missing, load() calls _load which handles hub download."""
         from sieve.models.classifier import LLMCodeClassifier
-        with patch.object(LLMCodeClassifier, "_download_from_hub",
-                          side_effect=Exception("Hub unavailable")) as mock_dl:
+        with patch.object(LLMCodeClassifier, "_load",
+                          side_effect=Exception("Hub unavailable")) as mock_load:
             with pytest.raises(Exception, match="Hub unavailable"):
                 LLMCodeClassifier.load(tmp_path)
-            mock_dl.assert_called_once()
+            mock_load.assert_called_once()
 
     def test_load_skips_hub_when_artifacts_present(self, tmp_path):
-        """When local artifacts exist, hub download is not called."""
+        """load() always calls _load — _load handles local vs hub internally."""
         from sieve.models.classifier import LLMCodeClassifier
-        clf = _make_classifier(tmp_path)  # creates tmp_path/artifacts/
+        _make_classifier(tmp_path)
         artifacts_dir = tmp_path / "artifacts"
-        with patch.object(LLMCodeClassifier, "_download_from_hub") as mock_dl:
-            with patch.object(LLMCodeClassifier, "_load"):
-                LLMCodeClassifier.load(artifacts_dir)
-            mock_dl.assert_not_called()
+        with patch.object(LLMCodeClassifier, "_load") as mock_load:
+            LLMCodeClassifier.load(artifacts_dir)
+            mock_load.assert_called_once()
 
     def test_load_calls_internal_load(self, tmp_path):
         clf = _make_classifier(tmp_path)
@@ -100,7 +97,7 @@ class TestLoad:
         from sieve.models.classifier import LLMCodeClassifier, _DEFAULT_MODEL_DIR
         if (_DEFAULT_MODEL_DIR / "best_model.pt").exists():
             pytest.skip("Artifacts exist locally — cannot test hub path")
-        with patch.object(LLMCodeClassifier, "_download_from_hub",
+        with patch.object(LLMCodeClassifier, "_load",
                           side_effect=Exception("no hub in CI")):
             with pytest.raises(Exception, match="no hub in CI"):
                 LLMCodeClassifier.load()

@@ -54,68 +54,24 @@ class LLMCodeClassifier:
         hf_token: Optional[str] = None,
     ) -> "LLMCodeClassifier":
         """
-        Load classifier. Resolution order:
-          1. Local artifacts at model_dir (or default artifacts/ dir)
-          2. Download from HuggingFace Hub (mrahman2025/sieve-llm-classifier)
+        Load classifier. Uses HuggingFace Hub cache by default.
+        Falls back to local artifacts if model_dir is provided and exists.
 
         Args:
             model_dir: Optional local path to model artifacts directory.
             hf_token:  Optional HuggingFace token for private repos.
         """
-        if model_dir is None:
-            model_dir = _DEFAULT_MODEL_DIR
-
-        model_dir = Path(model_dir)
-        instance  = cls(model_dir)
-
-        if not instance.is_available():
-            logger.info(
-                f"Local artifacts not found at {model_dir} — "
-                f"downloading from HuggingFace Hub ({HF_REPO_ID})..."
-            )
-            instance._download_from_hub(hf_token=hf_token)
-
+        instance = cls(model_dir or _DEFAULT_MODEL_DIR)
+        instance._hf_token = hf_token
         instance._load()
         return instance
 
-    def _download_from_hub(self, hf_token: Optional[str] = None):
-        """Download model artifacts from HuggingFace Hub to local model_dir."""
-        from huggingface_hub import hf_hub_download, snapshot_download
-
-        self.model_dir.mkdir(parents=True, exist_ok=True)
-
-        # Download model weights
-        logger.info("Downloading best_model.pt from HuggingFace Hub...")
-        hf_hub_download(
-            repo_id=HF_REPO_ID,
-            filename="best_model.pt",
-            local_dir=str(self.model_dir),
-            token=hf_token,
-        )
-
-        # Download tokenizer files
-        logger.info("Downloading tokenizer from HuggingFace Hub...")
-        tokenizer_dir = self.model_dir / "tokenizer"
-        tokenizer_dir.mkdir(exist_ok=True)
-        for fname in ["tokenizer_config.json", "vocab.json", "merges.txt",
-                      "special_tokens_map.json", "config.json"]:
-            try:
-                hf_hub_download(
-                    repo_id=HF_REPO_ID,
-                    filename=f"tokenizer/{fname}",
-                    local_dir=str(self.model_dir),
-                    token=hf_token,
-                )
-            except Exception:
-                pass  # Not all tokenizer files may exist
-
-        logger.info(f"Artifacts downloaded to {self.model_dir}")
-
     def _load(self):
-        """Lazy-load model and tokenizer onto device."""
+        """Load model and tokenizer — from HF Hub cache or local artifacts."""
         import torch
         import torch.nn as nn
         from transformers import AutoModel, AutoTokenizer
+        from huggingface_hub import hf_hub_download
 
         # Device selection
         if torch.cuda.is_available():
@@ -126,19 +82,41 @@ class LLMCodeClassifier:
             self._device = torch.device("cpu")
         logger.info(f"LLMCodeClassifier: using device {self._device}")
 
-        # Tokenizer
+        hf_token = getattr(self, "_hf_token", None)
+
+        # ── Tokenizer: load from HF Hub (cached to ~/.cache/huggingface) ──────
+        local_tok = self.model_dir / "tokenizer"
+        if local_tok.exists():
+            logger.info("Loading tokenizer from local artifacts...")
+            tok_path = str(local_tok)
+        else:
+            logger.info(f"Loading tokenizer from HF Hub ({HF_REPO_ID})...")
+            tok_path = HF_REPO_ID
+
         self._tokenizer = AutoTokenizer.from_pretrained(
-            str(self.model_dir / "tokenizer"),
-            local_files_only=True,
+            tok_path,
+            token=hf_token,
         )
 
-        # Model — recreate same architecture as training
+        # ── Model weights: load from HF Hub cache ─────────────────────────────
+        local_weights = self.model_dir / "best_model.pt"
+        if local_weights.exists():
+            logger.info("Loading weights from local artifacts...")
+            weights_path = local_weights
+        else:
+            logger.info(f"Downloading weights from HF Hub ({HF_REPO_ID})...")
+            weights_path = hf_hub_download(
+                repo_id=HF_REPO_ID,
+                filename="best_model.pt",
+                token=hf_token,
+            )
+
+        # ── Model architecture ────────────────────────────────────────────────
         class _CodeBERTClassifier(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.encoder    = AutoModel.from_pretrained(
                     "microsoft/codebert-base",
-                    local_files_only=False,
                 )
                 self.dropout    = nn.Dropout(0.1)
                 self.classifier = nn.Linear(self.encoder.config.hidden_size, 1)
@@ -150,10 +128,7 @@ class LLMCodeClassifier:
                 return self.classifier(cls).squeeze(-1)
 
         self._model = _CodeBERTClassifier().to(self._device)
-        state = torch.load(
-            self.model_dir / "best_model.pt",
-            map_location=self._device,
-        )
+        state = torch.load(weights_path, map_location=self._device)
         self._model.load_state_dict(state)
         self._model.eval()
         self._loaded = True
