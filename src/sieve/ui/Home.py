@@ -148,7 +148,7 @@ with st.sidebar:
 
     if engineered_only and not check_cloc():
         st.warning(
-            "⚠️ **cloc not found.** SIEVE will fall back to an AST-based LOC "
+            "**cloc not found.** SIEVE will fall back to an AST-based LOC "
             "counter. For best results, install cloc before running with this filter.",
             icon="⚠️",
         )
