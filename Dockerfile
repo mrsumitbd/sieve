@@ -1,0 +1,35 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the repo
+COPY . .
+
+# Install the sieve package
+RUN pip install --no-cache-dir -e .
+
+# HuggingFace Spaces runs as user 1000
+RUN useradd -m -u 1000 user
+USER user
+
+# Expose Streamlit port (HF Spaces requires 7860)
+EXPOSE 7860
+
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    STREAMLIT_SERVER_PORT=7860 \
+    STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+CMD ["streamlit", "run", "src/sieve/ui/Home.py", "--server.port=7860", "--server.address=0.0.0.0"]

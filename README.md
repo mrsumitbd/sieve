@@ -1,3 +1,13 @@
+---
+title: SIEVE
+emoji: 🔬
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # 🔬 SIEVE
 **Software Ingestion & Extraction for Verifiable Evaluation**
 
