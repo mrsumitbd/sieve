@@ -18,7 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # HuggingFace Spaces runs as user 1000
 RUN useradd -m -u 1000 user && \
     mkdir -p /home/user/.cache/huggingface && \
-    chown -R user:user /home/user
+    mkdir -p /app/src/sieve/models/artifacts && \
+    chown -R user:user /home/user && \
+    chown -R user:user /app/src/sieve/models/artifacts
 
 USER user
 
