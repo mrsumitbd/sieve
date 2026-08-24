@@ -12,11 +12,11 @@ pinned: false
 **Software Ingestion & Extraction for Verifiable Evaluation**
 
 [![Coverage](https://codecov.io/gh/mrsumitbd/sieve/graph/badge.svg?token=19aecee5-afb0-4d67-9c0d-bdab723ce8d3)](https://codecov.io/gh/mrsumitbd/sieve)
-![Tests](https://img.shields.io/badge/tests-214%20passed-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-270%20passed-brightgreen?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
-![Languages](https://img.shields.io/badge/languages-Python%20%7C%20Java%20%7C%20JavaScript-orange?style=flat-square)
-![Venue](https://img.shields.io/badge/venue-TBA-blueviolet?style=flat-square)
+![Languages](https://img.shields.io/badge/languages-Python%20%7C%20Java%20%7C%20JavaScript%20%7C%20C%2B%2B-orange?style=flat-square)
+![Venue](https://img.shields.io/badge/venue-MSR%202027%20Dublin-blueviolet?style=flat-square)
 
 SIEVE is a parameterized GitHub corpus builder for software engineering research. It lets you curate contamination-aware, high-quality code datasets from public repositories with full control over language, recency, repository quality, and test suite presence.
 
