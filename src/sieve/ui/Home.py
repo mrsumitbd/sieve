@@ -83,7 +83,7 @@ st.set_page_config(
 
 # ─── Session State Defaults ───────────────────────────────────────────────────
 
-for key in ("summary", "error", "sample", "output_dir_path"):
+for key in ("summary", "error", "sample", "output_dir_path", "pipeline_log"):
     if key not in st.session_state:
         st.session_state[key] = None
 
@@ -194,13 +194,6 @@ with st.sidebar:
         "GitHub Token (PAT)", type="password",
         help="Recommended. Without it, rate limit is 60 requests/hour.",
     )
-    hf_token = st.text_input(
-        "HuggingFace Token (optional)", type="password",
-        help=(
-            "Only needed if the LLM classifier repo is private. "
-            "Leave blank to use the public model."
-        ),
-    ) if annotate_llm_score else None
 
     run_button = st.button(
         "▶ Run SIEVE",
@@ -213,7 +206,7 @@ with st.sidebar:
         "📦 Load Example Dataset",
         use_container_width=True,
         help=(
-            "Load a pre-built demo corpus (54 functions, 8 classes "
+            "Load a pre-built demo corpus (54 functions/methods, 8 classes "
             "across 3 synthetic repositories). No GitHub token required."
         ),
     )
@@ -248,7 +241,6 @@ if run_button:
                 output_dir=tmp_dir,
                 export_format=export_format,
                 github_token=github_token if github_token else None,
-                hf_token=hf_token if hf_token else None,
             )
         except Exception as e:
             st.error(f"Configuration error: {e}")
@@ -257,11 +249,14 @@ if run_button:
         st.session_state.summary = None
         st.session_state.error   = None
         st.session_state.sample  = None
+        st.session_state.pipeline_log = []
 
         with st.status("Running SIEVE pipeline...", expanded=True) as status:
             def progress_callback(msg: str, current: int, total: int):
                 ts = datetime.now().strftime("%H:%M:%S")
-                st.write(f"`{ts}` {msg}")
+                line = f"`{ts}` {msg}"
+                st.write(line)
+                st.session_state.pipeline_log.append(f"{ts} {msg}")
 
             try:
                 summary = run_pipeline(config, progress_callback=progress_callback)
@@ -271,6 +266,13 @@ if run_button:
                 st.session_state.error = str(e)
                 status.update(label="❌ Pipeline failed", state="error", expanded=True)
                 st.error(str(e))
+
+
+# ─── Persistent Pipeline Log ─────────────────────────────────────────────────
+
+if st.session_state.pipeline_log:
+    with st.expander("📋 Pipeline Log", expanded=False):
+        st.code("\n".join(st.session_state.pipeline_log), language=None)
 
 
 # ─── Demo Dataset Load ────────────────────────────────────────────────────────
@@ -307,7 +309,7 @@ if st.session_state.summary:
     st.subheader("📊 Run Summary")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Repos Processed", s["total_repos_processed"])
-    c2.metric("Functions",       s["total_functions"])
+    c2.metric("Functions/Methods", s["total_functions"])
     c3.metric("Classes",         s["total_classes"])
     c4.metric("Total Records",   s["total_functions"] + s["total_classes"])
     c5.metric("Failed Repos",    s["total_repos_failed"])
@@ -367,7 +369,7 @@ if st.session_state.summary:
             chart_df = pd.DataFrame({
                 "Repo":  short_names * 2,
                 "Count": list(df["functions"]) + list(df["classes"]),
-                "Type":  ["Functions"] * len(df) + ["Classes"] * len(df),
+                "Type":  ["Functions/Methods"] * len(df) + ["Classes"] * len(df),
             })
             st.bar_chart(
                 chart_df.pivot(index="Repo", columns="Type", values="Count"),
@@ -375,13 +377,13 @@ if st.session_state.summary:
             )
 
         with chart_col2:
-            st.markdown("**Stars vs. Extracted Functions**")
+            st.markdown("**Stars vs. Extracted Functions/Methods**")
             scatter_df = pd.DataFrame({
-                "Repo":      short_names,
-                "Stars":     df["stars"],
-                "Functions": df["functions"],
+                "Repo":              short_names,
+                "Stars":             df["stars"],
+                "Functions/Methods": df["functions"],
             })
-            st.scatter_chart(scatter_df, x="Stars", y="Functions")
+            st.scatter_chart(scatter_df, x="Stars", y="Functions/Methods")
 
         chart_col3, chart_col4 = st.columns(2)
 
@@ -408,7 +410,7 @@ if st.session_state.summary:
             ]].copy()
             display_df.columns = [
                 "Repo", "Stars", "Contributors",
-                "Functions", "Classes",
+                "Functions/Methods", "Classes",
                 "Has Tests", "Test Confidence", "License",
             ]
             st.dataframe(display_df, use_container_width=True, hide_index=True)
@@ -421,7 +423,7 @@ if st.session_state.summary:
 
     available = {}
     if "functions_jsonl" in output_paths and Path(output_paths["functions_jsonl"]).exists():
-        available["Function"] = output_paths["functions_jsonl"]
+        available["Function/Method"] = output_paths["functions_jsonl"]
     if "classes_jsonl" in output_paths and Path(output_paths["classes_jsonl"]).exists():
         available["Class"] = output_paths["classes_jsonl"]
 
@@ -470,8 +472,7 @@ if st.session_state.summary:
                     f"{record.get('start_line')} – {record.get('end_line')}"
                 )
 
-                if rtype == "Function":
-                    st.markdown(f"- **Function:** `{record.get('func_name', '—')}`")
+                if rtype == "Function/Method":
                     st.markdown(f"- **Is Method:** {record.get('is_method', False)}")
                     if record.get("parent_class"):
                         st.markdown(f"- **Parent Class:** `{record.get('parent_class')}`")
@@ -514,8 +515,7 @@ if st.session_state.summary:
                         return "\n".join(used_imports) + "\n\n" + code
                     return code
 
-                if rtype == "Function":
-                    tab1, tab2, tab3 = st.tabs(["Full Source", "Signature", "AST"])
+                if rtype == "Function/Method":
                     with tab1:
                         st.code(_with_imports(record.get("source_code", "")), language=syntax_lang)
                     with tab2:
