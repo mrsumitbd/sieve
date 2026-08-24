@@ -1295,6 +1295,11 @@ def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionR
         if _depth > 200:
             return
         if node.type == "class_specifier":
+            # Skip forward declarations — they have no body (field_declaration_list)
+            has_body = any(c.type == "field_declaration_list" for c in node.children)
+            if not has_body:
+                return
+
             name_node = next(
                 (c for c in node.children if c.type == "type_identifier"), None
             )
