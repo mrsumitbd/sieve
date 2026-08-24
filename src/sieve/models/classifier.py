@@ -84,17 +84,10 @@ class LLMCodeClassifier:
 
         hf_token = getattr(self, "_hf_token", None)
 
-        # ── Tokenizer: load from HF Hub (cached to ~/.cache/huggingface) ──────
-        local_tok = self.model_dir / "tokenizer"
-        if local_tok.exists():
-            logger.info("Loading tokenizer from local artifacts...")
-            tok_path = str(local_tok)
-        else:
-            logger.info(f"Loading tokenizer from HF Hub ({HF_REPO_ID})...")
-            tok_path = HF_REPO_ID
-
+        # ── Tokenizer: always load from microsoft/codebert-base ───────────────
+        logger.info("Loading tokenizer from microsoft/codebert-base...")
         self._tokenizer = AutoTokenizer.from_pretrained(
-            tok_path,
+            "microsoft/codebert-base",
             token=hf_token,
         )
 
