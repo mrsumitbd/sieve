@@ -28,7 +28,7 @@ from typing import Callable, Optional
 from sieve.config import SIEVEConfig
 from sieve.core.discovery import discover_repos, RepoMetadata
 from sieve.core.detection import detect_test_suite
-from sieve.core.extraction import extract_from_repo, FunctionRecord, ClassRecord
+from sieve.core.extraction import extract_from_repo, count_repo_contents, FunctionRecord, ClassRecord
 from sieve.core.deduplication import deduplicate
 from sieve.core.export import export_dataset
 from sieve.core.quality import collect_metrics, apply_filters, RepoQualityMetrics
@@ -60,6 +60,8 @@ def _process_repo(
     repo_meta: RepoMetadata,
     config: SIEVEConfig,
     quality_metrics: Optional[RepoQualityMetrics],
+    func_cap: Optional[int] = None,
+    class_cap: Optional[int] = None,
 ) -> tuple[list[FunctionRecord], list[ClassRecord], Optional[dict]]:
     """
     Clone, detect, and extract a single repo.
@@ -77,13 +79,15 @@ def _process_repo(
             # Test suite detection — used for metadata only
             test_report = detect_test_suite(clone_path, config.language)
 
-            # Extraction
+            # Extraction with per-repo caps
             funcs, classes = extract_from_repo(
                 repo_path=clone_path,
                 language=config.language,
                 repo_name=repo_name,
                 granularities=config.granularity,
                 include_ast=config.export_ast,
+                func_cap=func_cap,
+                class_cap=class_cap,
             )
 
             # Build metadata dict
@@ -235,17 +239,77 @@ def run_pipeline(
         repos_to_process = all_discovered
         quality_map = {}
 
-    # ── Phase 3: Clone → Detect → Extract ────────────────────────────────────
+    # ── Phase 3: Two-pass extraction ─────────────────────────────────────────
+    # Pass 1: Count contents per repo (lightweight, no full extraction)
+    # Pass 2: Extract with per-repo caps computed from stratified allocation
 
     total = len(repos_to_process)
     _progress(f"Beginning extraction on {total} repositories.", 0, total)
 
+    # Pass 1 — Count
+    repo_func_counts:  dict[str, int] = {}
+    repo_class_counts: dict[str, int] = {}
+
+    if config.max_functions is not None or config.max_classes is not None:
+        _progress("Pass 1: Counting extractable records per repository...")
+        for idx, repo_meta in enumerate(repos_to_process):
+            repo_name = repo_meta.full_name
+            with tempfile.TemporaryDirectory() as tmpdir:
+                clone_path = str(Path(tmpdir) / "repo")
+                if _clone_repo(repo_name, clone_path):
+                    fc, cc = count_repo_contents(
+                        clone_path, config.language, config.granularity
+                    )
+                    repo_func_counts[repo_name]  = fc
+                    repo_class_counts[repo_name] = cc
+            _progress(
+                f"  [{idx+1}/{total}] {repo_name}: "
+                f"{repo_func_counts.get(repo_name, 0)} funcs, "
+                f"{repo_class_counts.get(repo_name, 0)} classes",
+                idx + 1, total,
+            )
+
+        # Compute stratified per-repo caps
+        def _stratified_caps(counts: dict[str, int], total_cap: int) -> dict[str, int]:
+            total_available = sum(counts.values())
+            if total_available == 0:
+                return {r: 0 for r in counts}
+            caps = {}
+            for repo, cnt in counts.items():
+                caps[repo] = max(1, round(cnt / total_available * total_cap))
+            # Adjust for rounding errors
+            diff = sum(caps.values()) - total_cap
+            sorted_repos = sorted(counts.keys(), key=lambda r: -counts[r])
+            for i in range(abs(diff)):
+                repo = sorted_repos[i % len(sorted_repos)]
+                caps[repo] = max(0, caps[repo] + (-1 if diff > 0 else 1))
+            return caps
+
+        func_caps  = (_stratified_caps(repo_func_counts,  config.max_functions)
+                      if config.max_functions  is not None else {})
+        class_caps = (_stratified_caps(repo_class_counts, config.max_classes)
+                      if config.max_classes is not None else {})
+    else:
+        func_caps  = {}
+        class_caps = {}
+
+    # Pass 2 — Extract with caps
+    _progress("Pass 2: Extracting code with per-repository caps...")
     for idx, repo_meta in enumerate(repos_to_process):
         repo_name = repo_meta.full_name
         _progress(f"[{idx+1}/{total}] Processing {repo_name}", idx + 1, total)
 
         qm = quality_map.get(repo_name)
-        funcs, classes, meta_dict = _process_repo(repo_meta, config, qm)
+
+        # Per-repo caps from stratified allocation
+        fc = func_caps.get(repo_name)
+        cc = class_caps.get(repo_name)
+
+        funcs, classes, meta_dict = _process_repo(
+            repo_meta, config, qm,
+            func_cap=fc,
+            class_cap=cc,
+        )
 
         if meta_dict is None:
             failed_repos.append(repo_name)
@@ -268,19 +332,19 @@ def run_pipeline(
         all_functions = deduplicate(all_functions, threshold=config.dedup_threshold)
         all_classes   = deduplicate(all_classes,   threshold=config.dedup_threshold)
 
-    # ── Phase 4b: Corpus size caps (stratified by repo) ──────────────────────
+    # ── Phase 4b: Final corpus size caps (safety net for edge cases) ─────────
+    # These caps are a safety net in case per-repo caps slightly overshoot
+    # due to rounding. The main capping happens in Pass 2 above.
 
     if config.max_functions is not None and len(all_functions) > config.max_functions:
         _progress(
-            f"Applying function cap: {len(all_functions)} → {config.max_functions} "
-            f"(stratified by repo)"
+            f"Applying final function cap: {len(all_functions)} → {config.max_functions}"
         )
         all_functions = _stratified_sample(all_functions, config.max_functions)
 
     if config.max_classes is not None and len(all_classes) > config.max_classes:
         _progress(
-            f"Applying class cap: {len(all_classes)} → {config.max_classes} "
-            f"(stratified by repo)"
+            f"Applying final class cap: {len(all_classes)} → {config.max_classes}"
         )
         all_classes = _stratified_sample(all_classes, config.max_classes)
 

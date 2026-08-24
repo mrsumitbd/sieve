@@ -1493,12 +1493,107 @@ def extract_from_file(
     return functions, classes
 
 
+def count_repo_contents(
+    repo_path: str,
+    language: str,
+    granularities: list[str],
+) -> tuple[int, int]:
+    """
+    Lightweight pass 1: count extractable functions and classes in a repo
+    without full extraction. Uses tree-sitter node counting only.
+
+    Returns:
+        (num_functions, num_classes)
+    """
+    extensions = LANGUAGE_EXTENSIONS.get(language, set())
+    num_functions = 0
+    num_classes   = 0
+
+    # Node types that represent functions and classes per language
+    FUNC_TYPES = {
+        "Python":     {"function_definition", "async_function_definition"},
+        "Java":       {"method_declaration", "constructor_declaration"},
+        "JavaScript": {"function_declaration", "function", "arrow_function",
+                       "method_definition"},
+        "C++":        {"function_definition"},
+    }
+    CLASS_TYPES = {
+        "Python":     {"class_definition"},
+        "Java":       {"class_declaration"},
+        "JavaScript": {"class_declaration"},
+        "C++":        {"class_specifier"},
+    }
+
+    func_types  = FUNC_TYPES.get(language, set())
+    class_types = CLASS_TYPES.get(language, set())
+
+    root = Path(repo_path)
+
+    for file_path in root.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix not in extensions:
+            continue
+        # Same test file exclusions as extract_from_repo
+        if any(p in file_path.parts for p in {"test", "tests", "__tests__", "spec", "specs"}):
+            continue
+        if file_path.name.startswith("test_") or file_path.name.endswith("_test.py"):
+            continue
+        if file_path.name.endswith(".test.js") or file_path.name.endswith(".spec.js"):
+            continue
+        if file_path.name.endswith("_test.cpp") or file_path.name.endswith("_test.cc"):
+            continue
+
+        try:
+            source = file_path.read_text(encoding="utf-8", errors="replace")
+
+            # Skip minified JS
+            if language == "JavaScript":
+                lines = source.splitlines()
+                if lines:
+                    max_line = max((len(l) for l in lines), default=0)
+                    avg_line = sum(len(l) for l in lines) / len(lines)
+                    if max_line > 1000 or avg_line > 300:
+                        continue
+
+            parser = _get_parser(language)
+            if parser is None:
+                continue
+            parser, _ = parser
+            tree = parser.parse(source.encode("utf-8"))
+
+            def _count(node):
+                fc, cc = 0, 0
+                if node.type in func_types:
+                    fc += 1
+                if node.type in class_types:
+                    cc += 1
+                for child in node.children:
+                    cf, cl = _count(child)
+                    fc += cf
+                    cc += cl
+                return fc, cc
+
+            fc, cc = _count(tree.root_node)
+            if "function" in granularities:
+                num_functions += fc
+            if "class" in granularities:
+                num_classes += cc
+
+        except Exception:
+            continue
+
+    return num_functions, num_classes
+
+
 def extract_from_repo(
     repo_path: str,
     language: str,
     repo_name: str,
     granularities: list[str],
     include_ast: bool = False,
+    func_cap: Optional[int] = None,
+    class_cap: Optional[int] = None,
 ) -> tuple[list[FunctionRecord], list[ClassRecord]]:
     """
     Walk a cloned repo and extract all matching source files.
@@ -1509,6 +1604,8 @@ def extract_from_repo(
         repo_name:    Full repo name (e.g. "owner/repo")
         granularities: List of granularity strings from config
         include_ast:  If True, populate full AST JSON on every record
+        func_cap:     Stop extracting functions after this many (None = no cap)
+        class_cap:    Stop extracting classes after this many (None = no cap)
 
     Returns:
         (all_functions, all_classes) across the entire repo
@@ -1520,12 +1617,15 @@ def extract_from_repo(
     root = Path(repo_path)
 
     for file_path in root.rglob("*"):
+        # Early stop if both caps reached
+        if (func_cap is not None and len(all_functions) >= func_cap and
+                class_cap is not None and len(all_classes) >= class_cap):
+            break
         if not file_path.is_file():
             continue
         if file_path.suffix not in extensions:
             continue
         # Skip test files from the extraction corpus
-        # They are catalogued by detection.py, not included in generation datasets
         if any(p in file_path.parts for p in {"test", "tests", "__tests__", "spec", "specs"}):
             continue
         if file_path.name.startswith("test_") or file_path.name.endswith("_test.py"):
@@ -1550,9 +1650,18 @@ def extract_from_repo(
         )
 
         if "function" in granularities:
-            all_functions.extend(funcs)
+            if func_cap is not None:
+                remaining = func_cap - len(all_functions)
+                all_functions.extend(funcs[:remaining])
+            else:
+                all_functions.extend(funcs)
+
         if "class" in granularities:
-            all_classes.extend(classes)
+            if class_cap is not None:
+                remaining = class_cap - len(all_classes)
+                all_classes.extend(classes[:remaining])
+            else:
+                all_classes.extend(classes)
 
         logger.debug(f"  {file_path.name}: {len(funcs)} functions, {len(classes)} classes")
 
