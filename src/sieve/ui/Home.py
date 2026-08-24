@@ -516,6 +516,7 @@ if st.session_state.summary:
                     return code
 
                 if rtype == "Function/Method":
+                    tab1, tab2, tab3 = st.tabs(["Full Source", "Signature", "AST"])
                     with tab1:
                         st.code(_with_imports(record.get("source_code", "")), language=syntax_lang)
                     with tab2:

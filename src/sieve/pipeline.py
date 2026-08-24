@@ -274,15 +274,27 @@ def run_pipeline(
             total_available = sum(counts.values())
             if total_available == 0:
                 return {r: 0 for r in counts}
+            # Initial proportional allocation
             caps = {}
             for repo, cnt in counts.items():
                 caps[repo] = max(1, round(cnt / total_available * total_cap))
-            # Adjust for rounding errors
-            diff = sum(caps.values()) - total_cap
+            # Adjust to match exact total — distribute remainder to largest repos
+            current_total = sum(caps.values())
+            diff = current_total - total_cap
+            # Sort by count descending for fair adjustment
             sorted_repos = sorted(counts.keys(), key=lambda r: -counts[r])
-            for i in range(abs(diff)):
+            i = 0
+            while diff > 0:
                 repo = sorted_repos[i % len(sorted_repos)]
-                caps[repo] = max(0, caps[repo] + (-1 if diff > 0 else 1))
+                if caps[repo] > 0:
+                    caps[repo] -= 1
+                    diff -= 1
+                i += 1
+            while diff < 0:
+                repo = sorted_repos[i % len(sorted_repos)]
+                caps[repo] += 1
+                diff += 1
+                i += 1
             return caps
 
         func_caps  = (_stratified_caps(repo_func_counts,  config.max_functions)
