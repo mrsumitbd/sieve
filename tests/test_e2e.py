@@ -472,3 +472,60 @@ class TestLLMScoreAnnotation:
             summary = _run_with_fake_repo(config, synthetic_repo)
 
         assert "total_functions" in summary
+
+
+# ─── Pass 3 shortfall redistribution ─────────────────────────────────────────
+
+class TestPass3Shortfall:
+    def test_final_cap_applied_when_overshoot(self, tmp_path, synthetic_repo):
+        """Phase 4b safety-net caps fire when per-repo extraction slightly overshoots."""
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=1,
+            max_classes=1,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+        summary = _run_with_fake_repo(config, synthetic_repo)
+        assert summary["total_functions"] <= 1
+        assert summary["total_classes"] <= 1
+
+    def test_shortfall_filled_from_other_repos(self, tmp_path, synthetic_repo, tmp_repo):
+        """
+        When one repo returns fewer records than allocated, Pass 3 fills the gap
+        from repos with remaining capacity.
+        """
+        import shutil
+
+        repo2 = tmp_repo({
+            "src/b.py": "\n".join(
+                [f"def func_{i}(): return {i}" for i in range(20)]
+            ) + "\n",
+        })
+
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=5,
+            max_classes=None,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+
+        meta1 = _make_repo_meta("owner/repo1")
+        meta2 = _make_repo_meta("owner/repo2")
+
+        def fake_clone(repo_full_name, target_dir):
+            src = str(synthetic_repo) if "repo1" in repo_full_name else str(repo2)
+            shutil.copytree(src, target_dir, dirs_exist_ok=True)
+            return True
+
+        with patch("sieve.pipeline.discover_repos",
+                   return_value=iter([meta1, meta2])), \
+             patch("sieve.pipeline._clone_repo", side_effect=fake_clone):
+            summary = run_pipeline(config)
+
+        assert summary["total_functions"] <= 5

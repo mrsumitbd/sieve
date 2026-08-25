@@ -105,3 +105,13 @@ class TestDeduplicate:
         result_high = deduplicate(records, threshold=0.95)
         # Low threshold should remove more
         assert len(result_low) <= len(result_high)
+
+    def test_dedup_error_keeps_item(self):
+        """When lsh.query raises, the item is kept (not silently dropped)."""
+        from unittest.mock import patch, MagicMock
+        records = [_FuncStub("def foo(): pass", "foo")]
+        mock_lsh = MagicMock()
+        mock_lsh.query.side_effect = Exception("lsh error")
+        with patch("sieve.core.deduplication.MinHashLSH", return_value=mock_lsh):
+            result = deduplicate(records, threshold=0.8)
+        assert len(result) == 1

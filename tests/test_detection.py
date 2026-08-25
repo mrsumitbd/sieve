@@ -101,3 +101,28 @@ class TestJavaScriptDetection:
         })
         report = detect_test_suite(str(repo), "JavaScript")
         assert report.is_present is False
+
+    def test_unreadable_config_file_handled_gracefully(self, tmp_repo):
+        """Exception when reading pyproject.toml is silently skipped."""
+        from unittest.mock import patch
+        repo = tmp_repo({
+            "src/app.py": "def foo(): pass",
+            "pyproject.toml": "[tool.pytest.ini_options]\n",
+        })
+        with patch("sieve.core.detection.Path.read_text",
+                   side_effect=PermissionError("cannot read")):
+            # Should not raise
+            report = detect_test_suite(str(repo), "Python")
+        assert report is not None
+
+    def test_unreadable_ci_yml_handled_gracefully(self, tmp_repo):
+        """Exception when reading CI YAML is silently skipped."""
+        from unittest.mock import patch
+        repo = tmp_repo({
+            "src/app.py": "def foo(): pass",
+            ".github/workflows/ci.yml": "name: CI\njobs:\n  test:\n    run: pytest\n",
+        })
+        with patch("sieve.core.detection.Path.read_text",
+                   side_effect=PermissionError("cannot read")):
+            report = detect_test_suite(str(repo), "Python")
+        assert report is not None

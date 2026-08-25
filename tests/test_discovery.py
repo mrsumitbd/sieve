@@ -171,3 +171,42 @@ class TestDiscoverRepos:
             ))
 
         assert results[0].license_spdx is None
+
+    def test_falls_back_to_pushed_at_when_commit_fails(self):
+        from sieve.core.discovery import discover_repos
+        from github import GithubException
+        mock_repo = self._make_mock_repo()
+        mock_repo.get_commits.side_effect = GithubException(409, "empty repo")
+        mock_repo.pushed_at.isoformat.return_value = "2024-05-01T00:00:00"
+
+        mock_results = MagicMock()
+        mock_results.totalCount = 1
+        mock_results.__iter__ = MagicMock(return_value=iter([mock_repo]))
+
+        with patch("sieve.core.discovery.Github") as mock_gh, \
+             patch("sieve.core.discovery._get_contributor_count", return_value=10):
+            mock_gh.return_value.search_repositories.return_value = mock_results
+            results = list(discover_repos(
+                language="Python",
+                start_date=date(2024, 1, 1),
+                end_date=date(2025, 1, 1),
+                min_stars=50,
+                min_contributors=5,
+            ))
+
+        assert results[0].last_commit_date == "2024-05-01T00:00:00"
+
+    def test_github_exception_during_search_raises(self):
+        from sieve.core.discovery import discover_repos
+        from github import GithubException
+
+        with patch("sieve.core.discovery.Github") as mock_gh:
+            mock_gh.return_value.search_repositories.side_effect = GithubException(403, "rate limited")
+            with pytest.raises(GithubException):
+                list(discover_repos(
+                    language="Python",
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2025, 1, 1),
+                    min_stars=50,
+                    min_contributors=5,
+                ))
