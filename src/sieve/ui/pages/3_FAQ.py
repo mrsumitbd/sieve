@@ -185,33 +185,44 @@ with st.expander("Why does a repository show 0 functions/methods or 0 classes?")
     This is expected behavior — not a bug. There are several reasons a repository
     may contribute 0 records for a given granularity:
 
-    **1. Stratified cap allocation.**
-    When **Max Functions/Methods** or **Max Classes** is set, SIEVE pre-counts
-    extractable records in each repository and allocates slots proportionally.
-    A very small repository competing with much larger ones (e.g. `imgui` with
-    9 classes alongside `godot` with 8,000) may receive a 0 allocation after
-    rounding. This is correct — the goal is proportional representation, and
-    very small repositories contribute negligibly to the overall corpus.
+    **1. The repository has very few real definitions after filtering.**
+    SIEVE filters out forward declarations, test files, and other non-substantive
+    code. A repository may appear to have classes or functions at the file level
+    but yield 0 after filtering.
 
-    **2. All files are test files.**
-    SIEVE intentionally skips test files (files in `test/`, `tests/`, `spec/`
-    directories, or named `test_*.py`, `*_test.cpp`, etc.). A repository whose
-    source files are predominantly tests may yield 0 records.
+    For example, `ocornut/imgui` is a single-header C++ library. Pass 1 counted
+    9 classes, but most are forward declarations (`class ImGuiContext;`) which
+    SIEVE correctly excludes. After filtering, 0 real class definitions remain.
 
-    **3. No matching granularity.**
+    **2. Stratified cap allocation rounds a small repo to 0.**
+    When **Max Functions/Methods** or **Max Classes** is set, SIEVE allocates
+    slots proportionally across repos. A very small repo competing with much
+    larger ones may receive a 0 allocation after rounding.
+
+    For example, with Max Classes = 30 across 10 repos where `godot` has 8,168
+    classes and `imgui` has 9, imgui's proportional share is less than 1 and may
+    round to 0. SIEVE uses a minimum-of-1 allocation to avoid this, but if the
+    repo then returns 0 real classes after filtering (see point 1), nothing can
+    be done.
+
+    **3. All source files are test files.**
+    SIEVE skips files in `test/`, `tests/`, `spec/` directories and files named
+    `test_*.py`, `*_test.cpp`, etc. A repo whose source is predominantly tests
+    may yield 0 records.
+
+    **4. No matching granularity.**
     If you select only **Class** granularity, a repository that only contains
-    standalone functions (common in C and functional-style JavaScript) will
-    show 0 classes. Similarly, selecting only **Function/Method** will yield 0
-    for repositories that only define classes with no standalone functions.
+    standalone functions will show 0 classes. Similarly for **Function/Method**
+    in a class-only repo.
 
-    **4. Minified or generated files.**
-    For JavaScript, SIEVE automatically skips minified files (`.min.js`) and
-    files with very long lines (likely webpack bundles). A JavaScript repository
-    that ships only minified builds may yield 0 records.
+    **5. Minified or generated files (JavaScript only).**
+    SIEVE skips `.min.js` files and files with very long lines (webpack bundles).
+    A JavaScript repo that ships only minified builds may yield 0 records.
 
-    **What to do:** if you want every repository to contribute at least one
-    record, increase **Max Functions/Methods** and **Max Classes** relative to
-    the number of repositories, or reduce **Max Repos**.
+    **What to do:** SIEVE's Pass 3 automatically redistributes unmet slots to
+    other repos with remaining capacity. If you still fall short, try increasing
+    **Max Functions/Methods** and **Max Classes** or reducing **Max Repos** so
+    each repo has a larger proportional allocation.
     """)
 
 # ── Citation ──────────────────────────────────────────────────────────────────
