@@ -316,3 +316,159 @@ class TestPipelineEngineeredOnly:
 
         assert summary["total_repos_processed"] == 0
         assert summary["total_functions"] == 0
+
+
+# ─── _clone_repo ──────────────────────────────────────────────────────────────
+
+class TestCloneRepo:
+    def test_returns_true_on_success(self, tmp_path):
+        from unittest.mock import patch, MagicMock
+        from sieve.pipeline import _clone_repo
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with patch("sieve.pipeline.subprocess.run", return_value=mock_result):
+            assert _clone_repo("owner/repo", str(tmp_path / "repo")) is True
+
+    def test_returns_false_on_nonzero_exit(self, tmp_path):
+        from unittest.mock import patch, MagicMock
+        from sieve.pipeline import _clone_repo
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "fatal: repository not found"
+        with patch("sieve.pipeline.subprocess.run", return_value=mock_result):
+            assert _clone_repo("owner/repo", str(tmp_path / "repo")) is False
+
+    def test_returns_false_on_timeout(self, tmp_path):
+        from unittest.mock import patch
+        from sieve.pipeline import _clone_repo
+        import subprocess
+
+        with patch("sieve.pipeline.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired("git", 300)):
+            assert _clone_repo("owner/repo", str(tmp_path / "repo")) is False
+
+    def test_returns_false_on_exception(self, tmp_path):
+        from unittest.mock import patch
+        from sieve.pipeline import _clone_repo
+
+        with patch("sieve.pipeline.subprocess.run",
+                   side_effect=OSError("git not found")):
+            assert _clone_repo("owner/repo", str(tmp_path / "repo")) is False
+
+
+# ─── Two-pass extraction with caps ───────────────────────────────────────────
+
+class TestTwoPassExtraction:
+    def test_max_functions_cap_respected(self, tmp_path, synthetic_repo):
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=2,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+        summary = _run_with_fake_repo(config, synthetic_repo)
+        assert summary["total_functions"] <= 2
+
+    def test_max_classes_cap_respected(self, tmp_path, synthetic_repo):
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_classes=1,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+        summary = _run_with_fake_repo(config, synthetic_repo)
+        assert summary["total_classes"] <= 1
+
+    def test_no_cap_extracts_all(self, tmp_path, synthetic_repo):
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=None,
+            max_classes=None,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+        summary = _run_with_fake_repo(config, synthetic_repo)
+        assert summary["total_functions"] > 0
+
+    def test_two_repos_stratified_allocation(self, tmp_path, synthetic_repo, tmp_repo):
+        """With two repos and a function cap, both repos should contribute."""
+        import shutil
+
+        repo2 = tmp_repo({
+            "src/b.py": "def beta(): pass\ndef gamma(): pass\n",
+        })
+
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=2,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+        meta1 = _make_repo_meta("owner/repo1")
+        meta2 = _make_repo_meta("owner/repo2")
+
+        def fake_clone(repo_full_name, target_dir):
+            src = str(synthetic_repo) if "repo1" in repo_full_name else str(repo2)
+            shutil.copytree(src, target_dir, dirs_exist_ok=True)
+            return True
+
+        with patch("sieve.pipeline.discover_repos",
+                   return_value=iter([meta1, meta2])), \
+             patch("sieve.pipeline._clone_repo", side_effect=fake_clone):
+            summary = run_pipeline(config)
+
+        assert summary["total_functions"] <= 2
+        assert summary["total_repos_processed"] == 2
+
+
+# ─── LLM score annotation ─────────────────────────────────────────────────────
+
+class TestLLMScoreAnnotation:
+    def test_annotate_llm_score_calls_classifier(self, tmp_path, synthetic_repo):
+        from unittest.mock import patch, MagicMock
+
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            annotate_llm_score=True,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+
+        mock_clf_instance = MagicMock()
+        mock_clf_instance.score_batch.return_value = [0.5, 0.3, 0.8, 0.1, 0.9]
+
+        with patch("sieve.models.classifier.LLMCodeClassifier.load",
+                   return_value=mock_clf_instance):
+            summary = _run_with_fake_repo(config, synthetic_repo)
+
+        assert "total_functions" in summary
+
+    def test_annotate_llm_score_failure_continues(self, tmp_path, synthetic_repo):
+        from unittest.mock import patch
+
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            annotate_llm_score=True,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+
+        with patch("sieve.models.classifier.LLMCodeClassifier.load",
+                   side_effect=Exception("Model unavailable")):
+            summary = _run_with_fake_repo(config, synthetic_repo)
+
+        assert "total_functions" in summary

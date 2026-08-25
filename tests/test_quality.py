@@ -133,3 +133,142 @@ class TestApplyFilters:
         m = _make_metrics(passes_stage1=False)
         m.passes_stage3 = True
         assert m.passes_all is False
+
+
+# ─── check_cloc ───────────────────────────────────────────────────────────────
+
+class TestCheckCloc:
+    def test_returns_true_when_cloc_available(self):
+        from unittest.mock import patch, MagicMock
+        from sieve.core.quality import check_cloc
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "v1.94\n"
+
+        with patch("sieve.core.quality.subprocess.run", return_value=mock_result):
+            assert check_cloc() is True
+
+    def test_returns_false_when_cloc_not_found(self):
+        from unittest.mock import patch
+        from sieve.core.quality import check_cloc
+        import subprocess
+
+        with patch("sieve.core.quality.subprocess.run",
+                   side_effect=FileNotFoundError("cloc not found")):
+            assert check_cloc() is False
+
+    def test_returns_false_when_cloc_times_out(self):
+        from unittest.mock import patch
+        from sieve.core.quality import check_cloc
+        import subprocess
+
+        with patch("sieve.core.quality.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired("cloc", 5)):
+            assert check_cloc() is False
+
+    def test_returns_false_when_cloc_nonzero_exit(self):
+        from unittest.mock import patch, MagicMock
+        from sieve.core.quality import check_cloc
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+
+        with patch("sieve.core.quality.subprocess.run", return_value=mock_result):
+            assert check_cloc() is False
+
+
+# ─── _count_loc_cloc ─────────────────────────────────────────────────────────
+
+class TestCountLocCloc:
+    def test_uses_cloc_when_available(self, tmp_path):
+        from unittest.mock import patch, MagicMock
+        from sieve.core.quality import _count_loc_cloc
+        import json
+
+        cloc_output = json.dumps({
+            "SUM": {"code": 500, "comment": 100}
+        })
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = cloc_output
+
+        with patch("sieve.core.quality.subprocess.run", return_value=mock_result):
+            loc, comments = _count_loc_cloc(str(tmp_path))
+
+        assert loc == 500
+        assert comments == 100
+
+    def test_falls_back_to_ast_when_cloc_fails(self, tmp_path):
+        from unittest.mock import patch
+        from sieve.core.quality import _count_loc_cloc
+
+        # Write a small Python file
+        (tmp_path / "test.py").write_text(
+            "def foo():\n    # comment\n    return 1\n"
+        )
+
+        with patch("sieve.core.quality.subprocess.run",
+                   side_effect=FileNotFoundError("cloc not found")):
+            loc, comments = _count_loc_cloc(str(tmp_path))
+
+        assert loc > 0  # AST fallback found something
+
+    def test_returns_zeros_on_empty_dir(self, tmp_path):
+        from unittest.mock import patch
+        from sieve.core.quality import _count_loc_cloc
+
+        with patch("sieve.core.quality.subprocess.run",
+                   side_effect=FileNotFoundError):
+            loc, comments = _count_loc_cloc(str(tmp_path))
+
+        assert loc == 0
+        assert comments == 0
+
+
+# ─── collect_quality_metrics ──────────────────────────────────────────────────
+
+class TestCollectQualityMetrics:
+    def test_returns_metrics_with_mocked_github(self, tmp_path):
+        from unittest.mock import patch, MagicMock
+        from sieve.core.quality import collect_metrics
+
+        mock_repo = MagicMock()
+        mock_repo.get_releases.return_value.totalCount = 5
+        mock_repo.get_pulls.return_value.totalCount = 20
+        mock_repo.get_issues.return_value.totalCount = 30
+
+        with patch("sieve.core.quality.Github") as mock_gh, \
+             patch("sieve.core.quality._count_loc_cloc", return_value=(1000, 200)):
+            mock_gh.return_value.get_repo.return_value = mock_repo
+            metrics = collect_metrics(
+                repo_full_name="owner/repo",
+                contributor_count=10,
+                license_spdx="MIT",
+                repo_path=str(tmp_path),
+            )
+
+        assert metrics.full_name == "owner/repo"
+        assert metrics.release_count == 5
+        assert metrics.loc == 1000
+        assert metrics.passes_stage1 is True
+        assert metrics.passes_stage2 is True
+
+    def test_handles_github_exception_gracefully(self, tmp_path):
+        from unittest.mock import patch, MagicMock
+        from github import GithubException
+        from sieve.core.quality import collect_metrics
+
+        with patch("sieve.core.quality.Github") as mock_gh, \
+             patch("sieve.core.quality._count_loc_cloc", return_value=(0, 0)):
+            mock_gh.return_value.get_repo.side_effect = GithubException(404, "Not Found")
+            metrics = collect_metrics(
+                repo_full_name="owner/missing",
+                contributor_count=5,
+                license_spdx="MIT",
+                repo_path=str(tmp_path),
+            )
+
+        assert metrics.release_count == 0
+        assert metrics.pull_request_count == 0
