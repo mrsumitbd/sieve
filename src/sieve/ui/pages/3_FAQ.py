@@ -180,6 +180,40 @@ with st.expander("Can I run SIEVE locally via the command line?"):
     CLI documentation.
     """)
 
+with st.expander("Why does a repository show 0 functions/methods or 0 classes?"):
+    st.markdown("""
+    This is expected behavior — not a bug. There are several reasons a repository
+    may contribute 0 records for a given granularity:
+
+    **1. Stratified cap allocation.**
+    When **Max Functions/Methods** or **Max Classes** is set, SIEVE pre-counts
+    extractable records in each repository and allocates slots proportionally.
+    A very small repository competing with much larger ones (e.g. `imgui` with
+    9 classes alongside `godot` with 8,000) may receive a 0 allocation after
+    rounding. This is correct — the goal is proportional representation, and
+    very small repositories contribute negligibly to the overall corpus.
+
+    **2. All files are test files.**
+    SIEVE intentionally skips test files (files in `test/`, `tests/`, `spec/`
+    directories, or named `test_*.py`, `*_test.cpp`, etc.). A repository whose
+    source files are predominantly tests may yield 0 records.
+
+    **3. No matching granularity.**
+    If you select only **Class** granularity, a repository that only contains
+    standalone functions (common in C and functional-style JavaScript) will
+    show 0 classes. Similarly, selecting only **Function/Method** will yield 0
+    for repositories that only define classes with no standalone functions.
+
+    **4. Minified or generated files.**
+    For JavaScript, SIEVE automatically skips minified files (`.min.js`) and
+    files with very long lines (likely webpack bundles). A JavaScript repository
+    that ships only minified builds may yield 0 records.
+
+    **What to do:** if you want every repository to contribute at least one
+    record, increase **Max Functions/Methods** and **Max Classes** relative to
+    the number of repositories, or reduce **Max Repos**.
+    """)
+
 # ── Citation ──────────────────────────────────────────────────────────────────
 
 st.subheader("Citation")
@@ -189,13 +223,13 @@ with st.expander("How do I cite SIEVE?"):
     If you use SIEVE in your research, please cite:
 
     ```bibtex
-    @inproceedings{rahman2026sieve,
+    @inproceedings{rahman2027sieve,
       title     = {{SIEVE}: A Contamination-Aware GitHub Corpus Builder for
                    Software Engineering Research},
       author    = {Rahman, Musfiqur and Shihab, Emad},
-      booktitle = {Proceedings of the 42nd International Conference on
-                   Software Maintenance and Evolution (ICSME)},
-      year      = {2026}
+      booktitle = {Proceedings of the 24th International Conference on
+                   Mining Software Repositories (MSR)},
+      year      = {2027}
     }
     ```
     *(Citation will be updated upon publication.)*
