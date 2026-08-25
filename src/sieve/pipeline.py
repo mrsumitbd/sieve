@@ -337,6 +337,97 @@ def run_pipeline(
         repo_metadata_list.append(meta_dict)
         time.sleep(0.2)
 
+    # ── Pass 3: Shortfall redistribution ─────────────────────────────────────
+    # If we're short of the target (e.g. a repo returned 0 despite having a
+    # slot allocated), redistribute the missing slots to repos with remaining
+    # capacity and re-extract from them.
+
+    func_shortfall  = (config.max_functions - len(all_functions)
+                       if config.max_functions is not None else 0)
+    class_shortfall = (config.max_classes - len(all_classes)
+                       if config.max_classes  is not None else 0)
+
+    if func_shortfall > 0 or class_shortfall > 0:
+        _progress(
+            f"Pass 3: Filling shortfall "
+            f"({func_shortfall} functions, {class_shortfall} classes)..."
+        )
+
+        # Existing record keys for deduplication
+        existing_func_keys  = {
+            (r.repo, r.file_path, r.start_line) for r in all_functions
+        }
+        existing_class_keys = {
+            (r.repo, r.file_path, r.start_line) for r in all_classes
+        }
+
+        # Repos with remaining capacity — sorted by available remainder desc
+        def _remaining(repo_name, counts, caps, extracted):
+            available = counts.get(repo_name, 0)
+            allocated = caps.get(repo_name, 0)
+            actual    = extracted.get(repo_name, 0)
+            return max(0, available - actual)
+
+        repo_extracted_funcs   = {r.repo: 0 for r in all_functions}
+        repo_extracted_classes = {r.repo: 0 for r in all_classes}
+        for r in all_functions:
+            repo_extracted_funcs[r.repo] = repo_extracted_funcs.get(r.repo, 0) + 1
+        for r in all_classes:
+            repo_extracted_classes[r.repo] = repo_extracted_classes.get(r.repo, 0) + 1
+
+        candidate_repos = sorted(
+            repos_to_process,
+            key=lambda m: -max(
+                _remaining(m.full_name, repo_func_counts,  func_caps,  repo_extracted_funcs),
+                _remaining(m.full_name, repo_class_counts, class_caps, repo_extracted_classes),
+            )
+        )
+
+        for repo_meta in candidate_repos:
+            if func_shortfall <= 0 and class_shortfall <= 0:
+                break
+
+            repo_name = repo_meta.full_name
+            add_fc = min(func_shortfall,  _remaining(repo_name, repo_func_counts,  func_caps,  repo_extracted_funcs))
+            add_cc = min(class_shortfall, _remaining(repo_name, repo_class_counts, class_caps, repo_extracted_classes))
+
+            if add_fc <= 0 and add_cc <= 0:
+                continue
+
+            qm = quality_map.get(repo_name)
+            extra_fc  = (repo_extracted_funcs.get(repo_name, 0)  + add_fc)  if add_fc  > 0 else None
+            extra_cc  = (repo_extracted_classes.get(repo_name, 0) + add_cc) if add_cc  > 0 else None
+
+            funcs, classes, _ = _process_repo(
+                repo_meta, config, qm,
+                func_cap=extra_fc,
+                class_cap=extra_cc,
+            )
+
+            # Add only new records not already extracted
+            new_funcs   = [r for r in funcs   if (r.repo, r.file_path, r.start_line) not in existing_func_keys]
+            new_classes = [r for r in classes if (r.repo, r.file_path, r.start_line) not in existing_class_keys]
+
+            # Trim to exact shortfall
+            new_funcs   = new_funcs[:func_shortfall]
+            new_classes = new_classes[:class_shortfall]
+
+            all_functions.extend(new_funcs)
+            all_classes.extend(new_classes)
+
+            for r in new_funcs:
+                existing_func_keys.add((r.repo, r.file_path, r.start_line))
+            for r in new_classes:
+                existing_class_keys.add((r.repo, r.file_path, r.start_line))
+
+            func_shortfall  -= len(new_funcs)
+            class_shortfall -= len(new_classes)
+
+            if new_funcs or new_classes:
+                _progress(
+                    f"  {repo_name}: +{len(new_funcs)} functions, +{len(new_classes)} classes"
+                )
+
     # ── Phase 4: Deduplication ────────────────────────────────────────────────
 
     if config.deduplicate:
