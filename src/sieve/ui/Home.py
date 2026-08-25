@@ -251,11 +251,11 @@ if run_button:
         st.session_state.sample  = None
         st.session_state.pipeline_log = []
 
+        # Stream live progress during the run
         with st.status("Running SIEVE pipeline...", expanded=True) as status:
             def progress_callback(msg: str, current: int, total: int):
                 ts = datetime.now().strftime("%H:%M:%S")
-                line = f"`{ts}` {msg}"
-                st.write(line)
+                st.write(f"`{ts}` {msg}")
                 st.session_state.pipeline_log.append(f"{ts} {msg}")
 
             try:
@@ -267,11 +267,10 @@ if run_button:
                 status.update(label="❌ Pipeline failed", state="error", expanded=True)
                 st.error(str(e))
 
-
 # ─── Persistent Pipeline Log ─────────────────────────────────────────────────
 
 if st.session_state.pipeline_log:
-    with st.expander("📋 Pipeline Log", expanded=False):
+    with st.expander("✅ Pipeline complete!", expanded=False):
         st.code("\n".join(st.session_state.pipeline_log), language=None)
 
 
