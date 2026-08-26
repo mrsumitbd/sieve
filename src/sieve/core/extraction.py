@@ -44,6 +44,7 @@ class FunctionRecord:
     ast_num_nodes: Optional[int] = None # Total node count
     ast_node_types: Optional[dict] = None  # Node type → count
     ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
+    commit_sha: Optional[str] = None    # Git commit SHA at extraction time (for GitHub permalink)
 
 
 @dataclass
@@ -69,6 +70,7 @@ class ClassRecord:
     ast_num_nodes: Optional[int] = None # Total node count
     ast_node_types: Optional[dict] = None  # Node type → count
     ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
+    commit_sha: Optional[str] = None    # Git commit SHA at extraction time (for GitHub permalink)
 
 
 # ─── Tree-sitter Setup ───────────────────────────────────────────────────────

@@ -476,9 +476,24 @@ if st.session_state.summary:
             rec_lang    = record.get("language", "Python")
             syntax_lang = _LANG_HIGHLIGHT.get(rec_lang, "python")
 
+            # Build GitHub permalink if commit_sha is available
+            commit_sha = record.get("commit_sha")
+            file_path  = record.get("file_path", "")
+            start_line = record.get("start_line")
+            end_line   = record.get("end_line")
+            repo_name  = record.get("repo", "")
+
+            if commit_sha and file_path and start_line:
+                gh_url = (
+                    f"https://github.com/{repo_name}/blob/{commit_sha}/{file_path}"
+                    f"#L{start_line}-L{end_line}"
+                )
+                gh_link = f"[View on GitHub ↗]({gh_url})"
+            else:
+                gh_link = f"[{repo_name}](https://github.com/{repo_name})"
+
             st.markdown(
-                f"**Sampled {rtype}** — "
-                f"[{record.get('repo')}](https://github.com/{record.get('repo')})"
+                f"**Sampled {rtype}** — {gh_link}"
             )
 
             info_col, code_col = st.columns([1, 2])

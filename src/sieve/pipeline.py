@@ -79,6 +79,16 @@ def _process_repo(
             # Test suite detection — used for metadata only
             test_report = detect_test_suite(clone_path, config.language)
 
+            # Get commit SHA for GitHub permalinks
+            try:
+                sha_result = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    capture_output=True, text=True, cwd=clone_path
+                )
+                commit_sha = sha_result.stdout.strip() if sha_result.returncode == 0 else None
+            except Exception:
+                commit_sha = None
+
             # Extraction with per-repo caps
             funcs, classes = extract_from_repo(
                 repo_path=clone_path,
@@ -89,6 +99,11 @@ def _process_repo(
                 func_cap=func_cap,
                 class_cap=class_cap,
             )
+
+            # Populate commit_sha on all records for GitHub permalinks
+            if commit_sha:
+                for r in funcs + classes:
+                    r.commit_sha = commit_sha
 
             # Build metadata dict
             meta_dict = {
