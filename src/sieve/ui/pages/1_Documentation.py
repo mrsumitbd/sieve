@@ -411,4 +411,66 @@ with st.expander("What is the LLM Score field?"):
     """)
 
 st.divider()
+
+# ─── How Detection Works ──────────────────────────────────────────────────────
+
+st.header("How Test Suite Detection Works")
+st.markdown("""
+SIEVE automatically detects whether a repository has a test suite using a
+**four-signal heuristic**. Each signal that fires contributes one point; a
+repo is considered to have a test suite if **≥ 2 signals** fire.
+
+| Signal | Examples |
+|---|---|
+| **Test directory** | `test/`, `tests/`, `__tests__/`, `spec/`, `specs/` at any depth |
+| **Test file naming** | `test_*.py`, `*_test.py`, `*_test.cpp`, `*.test.js`, `*.spec.ts`, `Test*.java` |
+| **Test runner config** | `pytest.ini`, `setup.cfg` with `[tool:pytest]`, `jest.config.js`, `karma.conf.js`, `pom.xml` with Surefire, `CMakeLists.txt` with `enable_testing()` |
+| **CI workflow** | `.github/workflows/*.yml` or `.circleci/config.yml` containing `pytest`, `jest`, `mvn test`, `ctest`, `cargo test`, or similar keywords |
+
+The two-signal threshold avoids false positives from repos that have a single
+test file but no real test infrastructure, while still catching repos that use
+non-standard directory layouts.
+
+Test suite presence is also one of the signals used by the **Engineered Projects**
+filter (Munaiah et al., 2017) — repos without any test infrastructure are more
+likely to be personal or experimental projects rather than production software.
+""")
+
+st.divider()
+
+# ─── License ─────────────────────────────────────────────────────────────────
+
+st.header("License")
+st.markdown("""
+SIEVE is released under the **MIT License**.
+
+```
+MIT License
+
+Copyright (c) 2026 Musfiqur Rahman, Emad Shihab
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+The full license is also available in the
+[GitHub repository](https://github.com/mrsumitbd/sieve/blob/main/LICENSE).
+""")
+
+st.divider()
 st.caption("SIEVE v0.1.0 · Built for SE research · [GitHub](https://github.com/mrsumitbd/sieve)")
