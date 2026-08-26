@@ -45,6 +45,10 @@ class FunctionRecord:
     ast_node_types: Optional[dict] = None  # Node type → count
     ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
     commit_sha: Optional[str] = None    # Git commit SHA at extraction time (for GitHub permalink)
+    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity
+    num_loops: Optional[int] = None              # Number of loop statements
+    num_statements: Optional[int] = None         # Number of statements
+    max_nesting_depth: Optional[int] = None      # Maximum control flow nesting depth
 
 
 @dataclass
@@ -71,6 +75,10 @@ class ClassRecord:
     ast_node_types: Optional[dict] = None  # Node type → count
     ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
     commit_sha: Optional[str] = None    # Git commit SHA at extraction time (for GitHub permalink)
+    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity
+    num_loops: Optional[int] = None              # Number of loop statements
+    num_statements: Optional[int] = None         # Number of statements
+    max_nesting_depth: Optional[int] = None      # Maximum control flow nesting depth
 
 
 # ─── Tree-sitter Setup ───────────────────────────────────────────────────────
@@ -178,6 +186,107 @@ def _compute_ast_features(
             ast_json = _node_to_ast_dict(root, source_bytes, max_depth=999)
 
         return depth_counter[0], num_nodes[0], node_types, ast_json
+
+    except Exception:
+        return None, None, None, None
+
+
+# Branching node types per language for cyclomatic complexity
+_BRANCH_NODES = {
+    "Python":     {"if_statement", "elif_clause", "for_statement", "while_statement",
+                   "except_clause", "with_statement", "match_statement", "case_clause",
+                   "boolean_operator"},
+    "Java":       {"if_statement", "for_statement", "while_statement", "do_statement",
+                   "switch_expression", "catch_clause", "conditional_expression"},
+    "JavaScript": {"if_statement", "for_statement", "for_in_statement", "while_statement",
+                   "do_statement", "switch_case", "catch_clause", "ternary_expression",
+                   "logical_expression"},
+    "C++":        {"if_statement", "for_statement", "while_statement", "do_statement",
+                   "switch_statement", "case_statement", "catch_clause",
+                   "conditional_expression"},
+}
+
+_LOOP_NODES = {
+    "Python":     {"for_statement", "while_statement"},
+    "Java":       {"for_statement", "while_statement", "do_statement"},
+    "JavaScript": {"for_statement", "for_in_statement", "while_statement", "do_statement"},
+    "C++":        {"for_statement", "while_statement", "do_statement"},
+}
+
+_STATEMENT_NODES = {
+    "Python":     {"expression_statement", "return_statement", "assign", "assignment",
+                   "augmented_assignment", "raise_statement", "assert_statement",
+                   "delete_statement", "pass_statement", "break_statement",
+                   "continue_statement", "import_statement", "import_from_statement"},
+    "Java":       {"expression_statement", "return_statement", "throw_statement",
+                   "assert_statement", "break_statement", "continue_statement",
+                   "local_variable_declaration"},
+    "JavaScript": {"expression_statement", "return_statement", "throw_statement",
+                   "break_statement", "continue_statement", "variable_declaration",
+                   "lexical_declaration"},
+    "C++":        {"expression_statement", "return_statement", "throw_statement",
+                   "break_statement", "continue_statement", "declaration"},
+}
+
+_CONTROL_NODES = {
+    "Python":     {"if_statement", "elif_clause", "for_statement", "while_statement",
+                   "with_statement", "try_statement", "except_clause"},
+    "Java":       {"if_statement", "for_statement", "while_statement", "do_statement",
+                   "try_statement", "catch_clause", "switch_expression"},
+    "JavaScript": {"if_statement", "for_statement", "for_in_statement", "while_statement",
+                   "do_statement", "try_statement", "catch_clause", "switch_statement"},
+    "C++":        {"if_statement", "for_statement", "while_statement", "do_statement",
+                   "try_statement", "catch_clause", "switch_statement"},
+}
+
+
+def _compute_code_metrics(
+    source: str,
+    language: str,
+) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """
+    Compute code structure metrics from the AST.
+
+    Returns:
+        (cyclomatic_complexity, num_loops, num_statements, max_nesting_depth)
+    """
+    try:
+        result = _get_parser(language)
+        if result is None:
+            return None, None, None, None
+        parser, _ = result
+        tree = parser.parse(source.encode("utf-8"))
+        root = tree.root_node
+
+        branch_types = _BRANCH_NODES.get(language, set())
+        loop_types   = _LOOP_NODES.get(language, set())
+        stmt_types   = _STATEMENT_NODES.get(language, set())
+        ctrl_types   = _CONTROL_NODES.get(language, set())
+
+        branch_count = [0]
+        loop_count   = [0]
+        stmt_count   = [0]
+        max_depth    = [0]
+
+        def _walk(node, ctrl_depth):
+            nt = node.type
+            if nt in branch_types:
+                branch_count[0] += 1
+            if nt in loop_types:
+                loop_count[0] += 1
+            if nt in stmt_types:
+                stmt_count[0] += 1
+            if nt in ctrl_types:
+                ctrl_depth += 1
+                if ctrl_depth > max_depth[0]:
+                    max_depth[0] = ctrl_depth
+            for child in node.children:
+                _walk(child, ctrl_depth)
+
+        _walk(root, 0)
+
+        cyclomatic = 1 + branch_count[0]
+        return cyclomatic, loop_count[0], stmt_count[0], max_depth[0]
 
     except Exception:
         return None, None, None, None
@@ -1496,6 +1605,14 @@ def extract_from_file(
         record.ast_num_nodes  = num_nodes
         record.ast_node_types = node_types
         record.ast            = ast_json
+
+        cc, loops, stmts, nesting = _compute_code_metrics(
+            record.source_code, language
+        )
+        record.cyclomatic_complexity = cc
+        record.num_loops             = loops
+        record.num_statements        = stmts
+        record.max_nesting_depth     = nesting
 
     return functions, classes
 
