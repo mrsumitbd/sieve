@@ -15,13 +15,13 @@ class TestBuildAstJson:
         result = build_ast_json(code, "Python")
         assert result is not None
         assert isinstance(result, dict)
-        assert "type" in result
+        assert "node_type" in result
         assert "children" in result
 
     def test_root_node_type(self):
         code = "x = 1"
         result = build_ast_json(code, "Python")
-        assert result["type"] == "module"
+        assert result["node_type"] == "module"
 
     def test_max_depth_limits_tree(self):
         code = "def foo():\n    if True:\n        return 1\n"
@@ -54,7 +54,7 @@ class TestBuildAstJson:
         code = "function add(a, b) { return a + b; }"
         result = build_ast_json(code, "JavaScript")
         assert result is not None
-        assert result["type"] == "program"
+        assert result["node_type"] == "program"
 
     def test_works_for_java(self):
         code = "class Foo { int x = 1; }"
@@ -87,6 +87,6 @@ class TestRenderAstComponent:
         ast_json = build_ast_json(code, "Python")
         html_400 = render_ast_component(ast_json, height=400)
         html_800 = render_ast_component(ast_json, height=800)
-        # height - 44 is used for tree container (controls bar takes 44px)
-        assert "356" in html_400  # 400 - 44
-        assert "756" in html_800  # 800 - 44
+        # height - 36 is used for tree container (controls bar takes 36px)
+        assert "364" in html_400  # 400 - 36
+        assert "764" in html_800  # 800 - 36

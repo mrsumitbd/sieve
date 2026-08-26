@@ -2,6 +2,7 @@
 sieve/ui/ast_viz.py
 
 Renders an interactive D3 collapsible tree of a code snippet's AST.
+Uses a box-style layout (type label + token text) growing top-to-bottom.
 Used in the Random Sample Viewer in Home.py.
 
 Supports Python, Java, JavaScript, and C++ via tree-sitter.
@@ -14,24 +15,16 @@ from typing import Optional
 # ── Node type color categories ────────────────────────────────────────────────
 
 _COLORS = {
-    # Declarations / definitions
     "definition":   "#7aa2f7",  # blue
-    # Control flow
     "control":      "#bb9af7",  # purple
-    # Literals
     "literal":      "#9ece6a",  # green
-    # Identifiers / names
     "identifier":   "#e0af68",  # orange
-    # Operators / punctuation
     "operator":     "#f7768e",  # red/pink
-    # Types / annotations
     "type":         "#2ac3de",  # cyan
-    # Default
     "default":      "#a9b1d6",  # muted lavender
 }
 
 _TYPE_CATEGORY = {
-    # Definitions
     "function_definition":        "definition",
     "async_function_definition":  "definition",
     "class_definition":           "definition",
@@ -40,7 +33,6 @@ _TYPE_CATEGORY = {
     "function_declaration":       "definition",
     "arrow_function":             "definition",
     "constructor_declaration":    "definition",
-    # Control flow
     "if_statement":               "control",
     "for_statement":              "control",
     "while_statement":            "control",
@@ -49,7 +41,6 @@ _TYPE_CATEGORY = {
     "except_clause":              "control",
     "with_statement":             "control",
     "match_statement":            "control",
-    # Literals
     "string":                     "literal",
     "integer":                    "literal",
     "float":                      "literal",
@@ -58,17 +49,14 @@ _TYPE_CATEGORY = {
     "none":                       "literal",
     "string_literal":             "literal",
     "number_literal":             "literal",
-    # Identifiers
     "identifier":                 "identifier",
     "attribute":                  "identifier",
     "field_identifier":           "identifier",
-    # Operators
     "binary_operator":            "operator",
     "unary_operator":             "operator",
     "comparison_operator":        "operator",
     "augmented_assignment":       "operator",
     "assignment":                 "operator",
-    # Types
     "type":                       "type",
     "generic_type":               "type",
     "annotated_type":             "type",
@@ -79,29 +67,24 @@ _TYPE_CATEGORY = {
 def _node_to_dict(node, source_bytes: bytes, max_depth: int, depth: int = 0) -> dict:
     """Recursively convert a tree-sitter node to a JSON-serializable dict."""
     node_type = node.type
+    is_leaf   = len(node.children) == 0
+    text      = node.text.decode("utf-8", errors="replace") if is_leaf else None
+    if text and len(text) > 30:
+        text = text[:27] + "..."
 
-    # Leaf nodes — include the token text
-    is_leaf = len(node.children) == 0
-    text = node.text.decode("utf-8", errors="replace") if is_leaf else None
-
-    # Truncate long tokens
-    if text and len(text) > 40:
-        text = text[:37] + "..."
-
-    label = node_type if not text else f"{node_type}: {repr(text)}"
     category = _TYPE_CATEGORY.get(node_type, "default")
-    color = _COLORS[category]
+    color    = _COLORS[category]
 
     result = {
-        "name":     label,
-        "type":     node_type,
-        "color":    color,
-        "children": [],
+        "node_type": node_type,
+        "text":      text,        # token text for leaf nodes, None for internal nodes
+        "color":     color,
+        "name":      node_type,   # kept for test compatibility
+        "children":  [],
     }
 
     if depth < max_depth:
         for child in node.children:
-            # Skip pure punctuation nodes to reduce noise
             if child.type in (",", ";", "(", ")", "{", "}", "[", "]", ":", "."):
                 continue
             result["children"].append(
@@ -141,10 +124,10 @@ def build_ast_json(
         else:
             return None
 
-        lang    = Language(ts_lang.language())
-        parser  = Parser(lang)
+        lang         = Language(ts_lang.language())
+        parser       = Parser(lang)
         source_bytes = source.encode("utf-8")
-        tree    = parser.parse(source_bytes)
+        tree         = parser.parse(source_bytes)
 
         return _node_to_dict(tree.root_node, source_bytes, max_depth)
 
@@ -154,7 +137,10 @@ def build_ast_json(
 
 def render_ast_component(ast_json: dict, height: int = 500) -> str:
     """
-    Generate a self-contained HTML component with a D3 collapsible tree.
+    Generate a self-contained HTML component with a D3 box-style AST tree.
+    Layout grows top-to-bottom. Each node is a rounded rectangle with:
+      - Top section: node type (colored by category)
+      - Bottom section: token text (for leaf nodes only)
 
     Args:
         ast_json: JSON tree from build_ast_json()
@@ -165,98 +151,83 @@ def render_ast_component(ast_json: dict, height: int = 500) -> str:
     """
     data_json = json.dumps(ast_json)
 
-    return f"""
-<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-
   body {{
     background: #1a1b26;
-    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-    overflow: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    overflow: hidden;
   }}
-
   #controls {{
     display: flex;
     gap: 8px;
-    padding: 8px 12px;
+    padding: 6px 10px;
     background: #16161e;
     border-bottom: 1px solid #2a2b3d;
     align-items: center;
+    height: 36px;
   }}
-
   button {{
     background: #2a2b3d;
     color: #a9b1d6;
     border: 1px solid #3b3d57;
     border-radius: 4px;
-    padding: 4px 10px;
-    font-size: 11px;
+    padding: 3px 9px;
+    font-size: 10px;
     cursor: pointer;
     font-family: inherit;
-    transition: background 0.15s;
   }}
-
   button:hover {{ background: #3b3d57; color: #c0caf5; }}
-
-  label {{
-    color: #565f89;
-    font-size: 11px;
-  }}
-
-  input[type=range] {{
-    width: 80px;
-    accent-color: #7aa2f7;
-  }}
-
-  #depth-val {{
-    color: #7aa2f7;
-    font-size: 11px;
-    min-width: 12px;
-  }}
-
+  label {{ color: #565f89; font-size: 10px; }}
+  input[type=range] {{ width: 70px; accent-color: #7aa2f7; }}
+  #depth-val {{ color: #7aa2f7; font-size: 10px; min-width: 10px; }}
   #tree-container {{
     width: 100%;
-    height: {height - 44}px;
+    height: {height - 36}px;
     overflow: auto;
+    position: relative;
   }}
-
-  svg {{
-    min-width: 100%;
-  }}
-
-  .node circle {{
-    stroke-width: 1.5px;
-    cursor: pointer;
-    transition: r 0.15s;
-  }}
-
-  .node circle:hover {{
-    r: 7;
-  }}
-
-  .node text {{
-    font-size: 10px;
-    fill: #c0caf5;
-    dominant-baseline: middle;
-    pointer-events: none;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  }}
-
-  .node text.collapsed-indicator {{
-    fill: #565f89;
-    font-size: 9px;
-  }}
-
+  svg {{ overflow: visible; }}
   .link {{
     fill: none;
-    stroke: #2a2b3d;
-    stroke-width: 1.2px;
+    stroke: #3b3d57;
+    stroke-width: 1.5px;
   }}
-
+  .node-rect {{
+    rx: 6; ry: 6;
+    stroke-width: 1.5px;
+    cursor: pointer;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+  }}
+  .node-type {{
+    font-size: 9px;
+    font-weight: bold;
+    fill: #1a1b26;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
+  }}
+  .node-text {{
+    font-size: 8px;
+    fill: #c0caf5;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
+  }}
+  .node-divider {{
+    stroke: rgba(0,0,0,0.2);
+    stroke-width: 1px;
+  }}
+  .collapsed-badge {{
+    font-size: 8px;
+    fill: #565f89;
+    text-anchor: middle;
+  }}
   .tooltip {{
     position: absolute;
     background: #16161e;
@@ -268,32 +239,40 @@ def render_ast_component(ast_json: dict, height: int = 500) -> str:
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.15s;
-    max-width: 200px;
+    max-width: 240px;
     word-break: break-all;
+    white-space: pre-wrap;
+    z-index: 10;
   }}
 </style>
 </head>
 <body>
-
 <div id="controls">
   <button id="btn-expand">Expand All</button>
   <button id="btn-collapse">Collapse All</button>
-  <button id="btn-reset">Reset View</button>
-  <label>Depth: </label>
+  <button id="btn-fit">Fit View</button>
+  <label>Depth:</label>
   <input type="range" id="depth-slider" min="1" max="10" value="6">
   <span id="depth-val">6</span>
 </div>
-
 <div id="tree-container">
   <div class="tooltip" id="tooltip"></div>
 </div>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <script>
 const RAW_DATA = {data_json};
 let maxDepth = 6;
 
-// ── Tree helpers ──────────────────────────────────────────────────────────────
+// Box dimensions
+const BOX_W  = 130;   // box width
+const BOX_TH = 22;    // type row height
+const BOX_TXT_H = 16; // text row height (leaf only)
+const BOX_GAP_X = 30; // horizontal gap between boxes
+const BOX_GAP_Y = 60; // vertical gap between levels
+
+function nodeHeight(d) {{
+  return d.data.text ? BOX_TH + BOX_TXT_H : BOX_TH;
+}}
 
 function pruneToDepth(node, depth) {{
   if (depth <= 0) {{
@@ -303,102 +282,125 @@ function pruneToDepth(node, depth) {{
   return {{ ...node, children: children.length ? children : undefined }};
 }}
 
-function cloneDeep(obj) {{
-  return JSON.parse(JSON.stringify(obj));
-}}
-
-// ── Layout constants ──────────────────────────────────────────────────────────
-
-const NODE_H = 22;
-const NODE_W = 220;
-const MARGIN = {{ top: 20, right: 20, bottom: 20, left: 20 }};
-
-// ── D3 setup ──────────────────────────────────────────────────────────────────
+function cloneDeep(obj) {{ return JSON.parse(JSON.stringify(obj)); }}
 
 const container = document.getElementById("tree-container");
 const tooltip   = document.getElementById("tooltip");
 
 const svg = d3.select(container).append("svg");
-const g   = svg.append("g").attr("transform", `translate(${{MARGIN.left}},${{MARGIN.top}})`);
+const g   = svg.append("g");
 
 const zoom = d3.zoom()
-  .scaleExtent([0.2, 3])
+  .scaleExtent([0.1, 4])
   .on("zoom", e => g.attr("transform", e.transform));
 svg.call(zoom);
-
-// ── Draw ──────────────────────────────────────────────────────────────────────
 
 function draw() {{
   g.selectAll("*").remove();
 
-  const data  = pruneToDepth(cloneDeep(RAW_DATA), maxDepth);
-  const root  = d3.hierarchy(data, d => d.children);
-  const treeLayout = d3.tree().nodeSize([NODE_H, NODE_W]);
+  const data = pruneToDepth(cloneDeep(RAW_DATA), maxDepth);
+  const root = d3.hierarchy(data, d => d.children);
+
+  // Custom tree layout with box sizes
+  const treeLayout = d3.tree()
+    .nodeSize([BOX_W + BOX_GAP_X, BOX_TH + BOX_GAP_Y]);
   treeLayout(root);
 
-  // Size SVG to content
   const nodes = root.descendants();
-  const minY  = d3.min(nodes, d => d.x);
-  const maxY  = d3.max(nodes, d => d.x);
-  const maxX  = d3.max(nodes, d => d.y);
-  const svgH  = maxY - minY + MARGIN.top + MARGIN.bottom + 40;
-  const svgW  = maxX + NODE_W + MARGIN.left + MARGIN.right + 60;
-  svg.attr("width", svgW).attr("height", svgH);
-  g.attr("transform", `translate(${{MARGIN.left}},${{MARGIN.top - minY + 20}})`);
+  const minX  = d3.min(nodes, d => d.x) - BOX_W / 2 - 20;
+  const maxX  = d3.max(nodes, d => d.x) + BOX_W / 2 + 20;
+  const minY  = -20;
+  const maxY  = d3.max(nodes, d => d.y) + BOX_TH + BOX_TXT_H + 20;
+  const svgW  = maxX - minX;
+  const svgH  = maxY - minY;
 
-  // Links
+  svg.attr("width", Math.max(svgW, container.clientWidth))
+     .attr("height", Math.max(svgH, container.clientHeight - 36));
+
+  // Center root
+  g.attr("transform", `translate(${{-minX}}, ${{-minY}})`);
+
+  // Links — connect bottom-center of parent to top-center of child
   g.selectAll(".link")
     .data(root.links())
     .join("path")
     .attr("class", "link")
-    .attr("d", d3.linkHorizontal()
-      .x(d => d.y)
-      .y(d => d.x));
+    .attr("d", d => {{
+      const ph = nodeHeight(d.source.data);
+      const sx = d.source.x, sy = d.source.y + ph;
+      const tx = d.target.x, ty = d.target.y;
+      const my = (sy + ty) / 2;
+      return `M${{sx}},${{sy}} C${{sx}},${{my}} ${{tx}},${{my}} ${{tx}},${{ty}}`;
+    }});
 
-  // Nodes
+  // Node groups
   const node = g.selectAll(".node")
     .data(nodes)
     .join("g")
     .attr("class", "node")
-    .attr("transform", d => `translate(${{d.y}},${{d.x}})`)
+    .attr("transform", d => `translate(${{d.x - BOX_W / 2}},${{d.y}})`)
     .on("mouseover", (e, d) => {{
+      const txt = d.data.text ? `${{d.data.node_type}}\\n"${{d.data.text}}"` : d.data.node_type;
       tooltip.style.opacity = 1;
-      tooltip.textContent   = d.data.name;
-      tooltip.style.left    = (e.pageX + 10) + "px";
-      tooltip.style.top     = (e.pageY - 10) + "px";
-    }})
-    .on("mousemove", e => {{
-      tooltip.style.left = (e.pageX + 10) + "px";
-      tooltip.style.top  = (e.pageY - 10) + "px";
+      tooltip.textContent   = txt;
+      tooltip.style.left    = (e.offsetX + 12) + "px";
+      tooltip.style.top     = (e.offsetY - 10) + "px";
     }})
     .on("mouseout", () => tooltip.style.opacity = 0);
 
-  node.append("circle")
-    .attr("r", 5)
+  // Type section (top, colored)
+  node.append("rect")
+    .attr("class", "node-rect")
+    .attr("width",  BOX_W)
+    .attr("height", d => nodeHeight(d.data))
     .attr("fill",   d => d.data.color || "#a9b1d6")
-    .attr("stroke", d => d3.color(d.data.color || "#a9b1d6").darker(0.8));
+    .attr("stroke", d => d3.color(d.data.color || "#a9b1d6").darker(1));
 
-  // Node labels — truncate long names
+  // Type label
   node.append("text")
-    .attr("x", d => d.children ? -9 : 9)
-    .attr("text-anchor", d => d.children ? "end" : "start")
+    .attr("class", "node-type")
+    .attr("x", BOX_W / 2)
+    .attr("y", BOX_TH / 2)
     .text(d => {{
-      const name = d.data.name || "";
-      return name.length > 30 ? name.slice(0, 28) + "…" : name;
+      const t = d.data.node_type || "";
+      return t.length > 18 ? t.slice(0, 16) + "…" : t;
     }});
 
-  // Collapsed indicator
+  // Divider + text row for leaf nodes
+  const leaves = node.filter(d => d.data.text);
+
+  leaves.append("line")
+    .attr("class", "node-divider")
+    .attr("x1", 0).attr("x2", BOX_W)
+    .attr("y1", BOX_TH).attr("y2", BOX_TH);
+
+  // Text row background (slightly darker)
+  leaves.append("rect")
+    .attr("x", 1).attr("y", BOX_TH)
+    .attr("width", BOX_W - 2)
+    .attr("height", BOX_TXT_H - 1)
+    .attr("rx", 0).attr("ry", 0)
+    .attr("fill", d => d3.color(d.data.color || "#a9b1d6").darker(1.5));
+
+  leaves.append("text")
+    .attr("class", "node-text")
+    .attr("x", BOX_W / 2)
+    .attr("y", BOX_TH + BOX_TXT_H / 2)
+    .text(d => {{
+      const t = d.data.text || "";
+      return t.length > 16 ? t.slice(0, 14) + "…" : t;
+    }});
+
+  // Collapsed badge
   node.filter(d => !d.children && d.data._children)
     .append("text")
-    .attr("class", "collapsed-indicator")
-    .attr("x", 9)
-    .attr("dy", "1.2em")
-    .attr("text-anchor", "start")
-    .text(d => `[+${{d.data._children.length}} hidden]`);
+    .attr("class", "collapsed-badge")
+    .attr("x", BOX_W / 2)
+    .attr("y", d => nodeHeight(d.data) + 12)
+    .text(d => `[+${{d.data._children.length}}]`);
 }}
 
-// ── Controls ──────────────────────────────────────────────────────────────────
-
+// Controls
 document.getElementById("depth-slider").addEventListener("input", e => {{
   maxDepth = +e.target.value;
   document.getElementById("depth-val").textContent = maxDepth;
@@ -419,13 +421,20 @@ document.getElementById("btn-collapse").addEventListener("click", () => {{
   draw();
 }});
 
-document.getElementById("btn-reset").addEventListener("click", () => {{
-  svg.call(zoom.transform, d3.zoomIdentity.translate(MARGIN.left, MARGIN.top));
+document.getElementById("btn-fit").addEventListener("click", () => {{
+  const svgEl   = svg.node();
+  const contEl  = container;
+  const svgW    = +svg.attr("width")  || svgEl.getBoundingClientRect().width;
+  const svgH    = +svg.attr("height") || svgEl.getBoundingClientRect().height;
+  const contW   = contEl.clientWidth;
+  const contH   = contEl.clientHeight;
+  const scale   = Math.min(contW / svgW, contH / svgH, 1) * 0.9;
+  const tx      = (contW - svgW * scale) / 2;
+  const ty      = (contH - svgH * scale) / 2;
+  svg.call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
 }});
 
-// Initial render
 draw();
 </script>
 </body>
-</html>
-"""
+</html>"""
