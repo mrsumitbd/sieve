@@ -174,14 +174,23 @@ with tab_func:
     | `return_annotation` | str \\| null | Return type annotation if present |
     | `docstring` | str \\| null | Docstring content, stripped of delimiters |
     | `source_code` | str | Full function source, indentation-normalized |
-    | `signature` | str | Function header + docstring + empty body — no implementation |
+    | `signature` | str | Function header + docstring + `pass` — no implementation |
     | `used_imports` | list[str] | Import statements whose names appear in the function body |
-    | `start_line` | int | Start line in the original file (body only, excludes imports) |
-    | `end_line` | int | End line in the original file (body only, excludes imports) |
+    | `start_line` | int | Start line in the original file |
+    | `end_line` | int | End line in the original file |
     | `is_method` | bool | True if defined inside a class |
     | `parent_class` | str \\| null | Enclosing class name if `is_method` is true |
     | `decorators` | list[str] | Decorator/annotation strings (e.g. `@staticmethod`, `@Override`) |
-    | `llm_score` | float \\| null | P(LLM-generated) — reserved for future classifier |
+    | `commit_sha` | str \\| null | Git commit SHA at extraction time — use to build GitHub permalink |
+    | `llm_score` | float \\| null | P(LLM-generated) from the built-in CodeBERT classifier |
+    | `ast_depth` | int \\| null | Maximum depth of the parse tree |
+    | `ast_num_nodes` | int \\| null | Total number of AST nodes |
+    | `ast_node_types` | dict \\| null | Node type → count mapping |
+    | `ast` | dict \\| null | Full AST as nested JSON (only when Export AST is enabled) |
+    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity (1 + number of branches) |
+    | `num_loops` | int \\| null | Number of loop statements (for, while) |
+    | `num_statements` | int \\| null | Number of statements in the function body |
+    | `max_nesting_depth` | int \\| null | Maximum control flow nesting depth |
     """)
 
 with tab_class:
@@ -199,12 +208,54 @@ with tab_class:
     | `used_imports` | list[str] | Import statements whose names appear in the class body |
     | `method_names` | list[str] | Names of all methods defined in the class |
     | `method_count` | int | Number of methods |
-    | `has_constructor` | bool | True if a constructor is defined (`__init__` in Python, `constructor` in JS, constructor declaration in Java) |
-    | `decorators` | list[str] | Decorator/annotation strings on the class (e.g. `@dataclass`, `@Entity`) |
-    | `start_line` | int | Start line in the original file (body only, excludes imports) |
-    | `end_line` | int | End line in the original file (body only, excludes imports) |
-    | `llm_score` | float \\| null | P(LLM-generated) — reserved for future classifier |
+    | `has_constructor` | bool | True if a constructor is defined |
+    | `decorators` | list[str] | Decorator/annotation strings on the class |
+    | `start_line` | int | Start line in the original file |
+    | `end_line` | int | End line in the original file |
+    | `commit_sha` | str \\| null | Git commit SHA at extraction time — use to build GitHub permalink |
+    | `llm_score` | float \\| null | P(LLM-generated) from the built-in CodeBERT classifier |
+    | `ast_depth` | int \\| null | Maximum depth of the parse tree |
+    | `ast_num_nodes` | int \\| null | Total number of AST nodes |
+    | `ast_node_types` | dict \\| null | Node type → count mapping |
+    | `ast` | dict \\| null | Full AST as nested JSON (only when Export AST is enabled) |
+    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity (1 + number of branches) |
+    | `num_loops` | int \\| null | Number of loop statements (for, while) |
+    | `num_statements` | int \\| null | Number of statements in the class body |
+    | `max_nesting_depth` | int \\| null | Maximum control flow nesting depth |
     """)
+
+st.divider()
+
+# ─── Code Structure Metrics ───────────────────────────────────────────────────
+
+st.header("Code Structure Metrics")
+st.markdown("""
+SIEVE computes four structural metrics from the AST of every extracted record.
+These are always populated — no extra configuration needed.
+
+**Cyclomatic Complexity** (`cyclomatic_complexity`)
+McCabe's cyclomatic complexity — a measure of the number of linearly independent
+paths through the code. Computed as `1 + number of branching statements`
+(if/elif, for, while, switch/case, except, logical &&/||).
+A function with no branches has complexity 1. Higher values indicate more complex
+control flow and are generally harder to test and maintain.
+
+**Loop Count** (`num_loops`)
+The number of loop statements (for, while, do-while) in the function or class body.
+Nested loops each count separately.
+
+**Statement Count** (`num_statements`)
+The number of executable statements — assignments, returns, raises, calls, etc.
+Does not count declarations, imports, or control structure keywords themselves.
+
+**Max Nesting Depth** (`max_nesting_depth`)
+The maximum depth of nested control flow structures (if, for, while, try, with).
+A function with a for loop inside an if has depth 2. Deeply nested code (depth ≥ 4)
+is often a sign of complexity that could be refactored.
+
+These metrics are computed using tree-sitter — no external tools required — and
+are consistent across all four supported languages.
+""")
 
 st.divider()
 
