@@ -535,17 +535,31 @@ if st.session_state.summary:
                     f"{f'{llm:.3f}' if llm is not None else '`not scored`'}"
                 )
 
-                # Code structure metrics
-                cc    = record.get("cyclomatic_complexity")
-                loops = record.get("num_loops")
-                stmts = record.get("num_statements")
-                nest  = record.get("max_nesting_depth")
-                if any(v is not None for v in [cc, loops, stmts, nest]):
+                # Code structure metrics — use stored values or compute on-the-fly
+                cc     = record.get("cyclomatic_complexity")
+                nloc   = record.get("nloc")
+                tokens = record.get("token_count")
+                params = record.get("parameter_count")
+                length = record.get("length")
+
+                if all(v is None for v in [cc, nloc, tokens, params, length]):
+                    from sieve.core.extraction import _compute_code_metrics
+                    metrics = _compute_code_metrics(
+                        record.get("source_code", ""), rec_lang
+                    )
+                    cc     = metrics.get("cyclomatic_complexity")
+                    nloc   = metrics.get("nloc")
+                    tokens = metrics.get("token_count")
+                    params = metrics.get("parameter_count")
+                    length = metrics.get("length")
+
+                if any(v is not None for v in [cc, nloc, tokens, params, length]):
                     st.markdown("**Code Metrics**")
-                    if cc    is not None: st.markdown(f"- **Cyclomatic Complexity:** {cc}")
-                    if loops is not None: st.markdown(f"- **Loops:** {loops}")
-                    if stmts is not None: st.markdown(f"- **Statements:** {stmts}")
-                    if nest  is not None: st.markdown(f"- **Max Nesting Depth:** {nest}")
+                    if cc     is not None: st.markdown(f"- **Cyclomatic Complexity:** {cc}")
+                    if nloc   is not None: st.markdown(f"- **NLOC:** {nloc}")
+                    if tokens is not None: st.markdown(f"- **Token Count:** {tokens}")
+                    if params is not None: st.markdown(f"- **Parameters:** {params}")
+                    if length is not None: st.markdown(f"- **Length (lines):** {length}")
 
                 used_imports = record.get("used_imports") or []
                 if isinstance(used_imports, str):

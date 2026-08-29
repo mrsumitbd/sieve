@@ -45,10 +45,11 @@ class FunctionRecord:
     ast_node_types: Optional[dict] = None  # Node type → count
     ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
     commit_sha: Optional[str] = None    # Git commit SHA at extraction time (for GitHub permalink)
-    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity
-    num_loops: Optional[int] = None              # Number of loop statements
-    num_statements: Optional[int] = None         # Number of statements
-    max_nesting_depth: Optional[int] = None      # Maximum control flow nesting depth
+    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity (lizard)
+    nloc: Optional[int] = None                   # Non-comment lines of code (lizard)
+    token_count: Optional[int] = None            # Total token count (lizard)
+    parameter_count: Optional[int] = None        # Number of parameters (lizard)
+    length: Optional[int] = None                 # Function length in lines (lizard)
 
 
 @dataclass
@@ -75,10 +76,11 @@ class ClassRecord:
     ast_node_types: Optional[dict] = None  # Node type → count
     ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
     commit_sha: Optional[str] = None    # Git commit SHA at extraction time (for GitHub permalink)
-    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity
-    num_loops: Optional[int] = None              # Number of loop statements
-    num_statements: Optional[int] = None         # Number of statements
-    max_nesting_depth: Optional[int] = None      # Maximum control flow nesting depth
+    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity (lizard)
+    nloc: Optional[int] = None                   # Non-comment lines of code (lizard)
+    token_count: Optional[int] = None            # Total token count (lizard)
+    parameter_count: Optional[int] = None        # Number of parameters (lizard)
+    length: Optional[int] = None                 # Length in lines (lizard)
 
 
 # ─── Tree-sitter Setup ───────────────────────────────────────────────────────
@@ -191,105 +193,67 @@ def _compute_ast_features(
         return None, None, None, None
 
 
-# Branching node types per language for cyclomatic complexity
-_BRANCH_NODES = {
-    "Python":     {"if_statement", "elif_clause", "for_statement", "while_statement",
-                   "except_clause", "with_statement", "match_statement", "case_clause",
-                   "boolean_operator"},
-    "Java":       {"if_statement", "for_statement", "while_statement", "do_statement",
-                   "switch_expression", "catch_clause", "conditional_expression"},
-    "JavaScript": {"if_statement", "for_statement", "for_in_statement", "while_statement",
-                   "do_statement", "switch_case", "catch_clause", "ternary_expression",
-                   "logical_expression"},
-    "C++":        {"if_statement", "for_statement", "while_statement", "do_statement",
-                   "switch_statement", "case_statement", "catch_clause",
-                   "conditional_expression"},
-}
-
-_LOOP_NODES = {
-    "Python":     {"for_statement", "while_statement"},
-    "Java":       {"for_statement", "while_statement", "do_statement"},
-    "JavaScript": {"for_statement", "for_in_statement", "while_statement", "do_statement"},
-    "C++":        {"for_statement", "while_statement", "do_statement"},
-}
-
-_STATEMENT_NODES = {
-    "Python":     {"expression_statement", "return_statement", "assign", "assignment",
-                   "augmented_assignment", "raise_statement", "assert_statement",
-                   "delete_statement", "pass_statement", "break_statement",
-                   "continue_statement", "import_statement", "import_from_statement"},
-    "Java":       {"expression_statement", "return_statement", "throw_statement",
-                   "assert_statement", "break_statement", "continue_statement",
-                   "local_variable_declaration"},
-    "JavaScript": {"expression_statement", "return_statement", "throw_statement",
-                   "break_statement", "continue_statement", "variable_declaration",
-                   "lexical_declaration"},
-    "C++":        {"expression_statement", "return_statement", "throw_statement",
-                   "break_statement", "continue_statement", "declaration"},
-}
-
-_CONTROL_NODES = {
-    "Python":     {"if_statement", "elif_clause", "for_statement", "while_statement",
-                   "with_statement", "try_statement", "except_clause"},
-    "Java":       {"if_statement", "for_statement", "while_statement", "do_statement",
-                   "try_statement", "catch_clause", "switch_expression"},
-    "JavaScript": {"if_statement", "for_statement", "for_in_statement", "while_statement",
-                   "do_statement", "try_statement", "catch_clause", "switch_statement"},
-    "C++":        {"if_statement", "for_statement", "while_statement", "do_statement",
-                   "try_statement", "catch_clause", "switch_statement"},
-}
-
-
 def _compute_code_metrics(
     source: str,
     language: str,
-) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
+) -> dict:
     """
-    Compute code structure metrics from the AST.
+    Compute code structure metrics using the lizard library.
+    Works for Python, Java, JavaScript, and C++.
 
-    Returns:
-        (cyclomatic_complexity, num_loops, num_statements, max_nesting_depth)
+    Returns a dict with:
+        cyclomatic_complexity, nloc, token_count,
+        parameter_count, length
+    All values are None if computation fails.
     """
+    _LIZARD_LANG = {
+        "Python":     ".py",
+        "Java":       ".java",
+        "JavaScript": ".js",
+        "C++":        ".cpp",
+    }
+    ext = _LIZARD_LANG.get(language)
+    if ext is None:
+        return {}
+
     try:
-        result = _get_parser(language)
-        if result is None:
-            return None, None, None, None
-        parser, _ = result
-        tree = parser.parse(source.encode("utf-8"))
-        root = tree.root_node
+        import lizard
+        import tempfile
+        import os
 
-        branch_types = _BRANCH_NODES.get(language, set())
-        loop_types   = _LOOP_NODES.get(language, set())
-        stmt_types   = _STATEMENT_NODES.get(language, set())
-        ctrl_types   = _CONTROL_NODES.get(language, set())
+        with tempfile.NamedTemporaryFile(
+            suffix=ext, mode="w", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(source)
+            tmp = f.name
 
-        branch_count = [0]
-        loop_count   = [0]
-        stmt_count   = [0]
-        max_depth    = [0]
+        try:
+            result = lizard.analyze_file(tmp)
+        finally:
+            os.unlink(tmp)
 
-        def _walk(node, ctrl_depth):
-            nt = node.type
-            if nt in branch_types:
-                branch_count[0] += 1
-            if nt in loop_types:
-                loop_count[0] += 1
-            if nt in stmt_types:
-                stmt_count[0] += 1
-            if nt in ctrl_types:
-                ctrl_depth += 1
-                if ctrl_depth > max_depth[0]:
-                    max_depth[0] = ctrl_depth
-            for child in node.children:
-                _walk(child, ctrl_depth)
+        if not result.function_list:
+            # File-level metrics when no functions found
+            return {
+                "cyclomatic_complexity": None,
+                "nloc":                 result.nloc,
+                "token_count":          result.token_count,
+                "parameter_count":      None,
+                "length":               None,
+            }
 
-        _walk(root, 0)
-
-        cyclomatic = 1 + branch_count[0]
-        return cyclomatic, loop_count[0], stmt_count[0], max_depth[0]
+        # Aggregate across all functions in the snippet
+        fns = result.function_list
+        return {
+            "cyclomatic_complexity": max(f.cyclomatic_complexity for f in fns),
+            "nloc":                  sum(f.nloc for f in fns),
+            "token_count":           result.token_count,
+            "parameter_count":       fns[0].parameter_count if len(fns) == 1 else None,
+            "length":                sum(f.length for f in fns),
+        }
 
     except Exception:
-        return None, None, None, None
+        return {}
 
 
 def _clean_indentation(snippet: str) -> str:
@@ -1606,13 +1570,12 @@ def extract_from_file(
         record.ast_node_types = node_types
         record.ast            = ast_json
 
-        cc, loops, stmts, nesting = _compute_code_metrics(
-            record.source_code, language
-        )
-        record.cyclomatic_complexity = cc
-        record.num_loops             = loops
-        record.num_statements        = stmts
-        record.max_nesting_depth     = nesting
+        metrics = _compute_code_metrics(record.source_code, language)
+        record.cyclomatic_complexity = metrics.get("cyclomatic_complexity")
+        record.nloc                  = metrics.get("nloc")
+        record.token_count           = metrics.get("token_count")
+        record.parameter_count       = metrics.get("parameter_count")
+        record.length                = metrics.get("length")
 
     return functions, classes
 
