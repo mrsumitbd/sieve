@@ -535,6 +535,18 @@ if st.session_state.summary:
                     f"{f'{llm:.3f}' if llm is not None else '`not scored`'}"
                 )
 
+                # Code structure metrics
+                cc    = record.get("cyclomatic_complexity")
+                loops = record.get("num_loops")
+                stmts = record.get("num_statements")
+                nest  = record.get("max_nesting_depth")
+                if any(v is not None for v in [cc, loops, stmts, nest]):
+                    st.markdown("**Code Metrics**")
+                    if cc    is not None: st.markdown(f"- **Cyclomatic Complexity:** {cc}")
+                    if loops is not None: st.markdown(f"- **Loops:** {loops}")
+                    if stmts is not None: st.markdown(f"- **Statements:** {stmts}")
+                    if nest  is not None: st.markdown(f"- **Max Nesting Depth:** {nest}")
+
                 used_imports = record.get("used_imports") or []
                 if isinstance(used_imports, str):
                     used_imports = json.loads(used_imports)

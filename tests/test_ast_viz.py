@@ -87,6 +87,6 @@ class TestRenderAstComponent:
         ast_json = build_ast_json(code, "Python")
         html_400 = render_ast_component(ast_json, height=400)
         html_800 = render_ast_component(ast_json, height=800)
-        # height - 36 is used for tree container (controls bar takes 36px)
-        assert "364" in html_400  # 400 - 36
-        assert "764" in html_800  # 800 - 36
+        # height - 44 is used for tree container (controls bar takes 44px)
+        assert "356" in html_400  # 400 - 44
+        assert "756" in html_800  # 800 - 44
