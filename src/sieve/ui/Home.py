@@ -464,13 +464,14 @@ if st.session_state.summary:
             try:
                 lines  = Path(available[record_type]).read_text(encoding="utf-8").splitlines()
                 lines  = [l for l in lines if l.strip()]
-                record = json.loads(random.choice(lines))
-                st.session_state.sample = (record_type, record)
+                row_id = random.randint(0, len(lines) - 1)
+                record = json.loads(lines[row_id])
+                st.session_state.sample = (record_type, record, row_id, len(lines))
             except Exception as e:
                 st.error(f"Could not sample: {e}")
 
         if st.session_state.sample:
-            rtype, record = st.session_state.sample
+            rtype, record, row_id, total_rows = st.session_state.sample
 
             # Resolve syntax highlighting from record language
             rec_lang    = record.get("language", "Python")
@@ -493,7 +494,8 @@ if st.session_state.summary:
                 gh_link = f"[{repo_name}](https://github.com/{repo_name})"
 
             st.markdown(
-                f"**Sampled {rtype}** — {gh_link}"
+                f"**Sampled {rtype}** — {gh_link} &nbsp;·&nbsp; "
+                f"`Record #{row_id + 1} of {total_rows}`"
             )
 
             info_col, code_col = st.columns([1, 2])
@@ -535,32 +537,6 @@ if st.session_state.summary:
                     f"{f'{llm:.3f}' if llm is not None else '`not scored`'}"
                 )
 
-                # Code structure metrics — use stored values or compute on-the-fly
-                cc     = record.get("cyclomatic_complexity")
-                nloc   = record.get("nloc")
-                tokens = record.get("token_count")
-                params = record.get("parameter_count")
-                length = record.get("length")
-
-                if all(v is None for v in [cc, nloc, tokens, params, length]):
-                    from sieve.core.extraction import _compute_code_metrics
-                    metrics = _compute_code_metrics(
-                        record.get("source_code", ""), rec_lang
-                    )
-                    cc     = metrics.get("cyclomatic_complexity")
-                    nloc   = metrics.get("nloc")
-                    tokens = metrics.get("token_count")
-                    params = metrics.get("parameter_count")
-                    length = metrics.get("length")
-
-                if any(v is not None for v in [cc, nloc, tokens, params, length]):
-                    st.markdown("**Code Metrics**")
-                    if cc     is not None: st.markdown(f"- **Cyclomatic Complexity:** {cc}")
-                    if nloc   is not None: st.markdown(f"- **NLOC:** {nloc}")
-                    if tokens is not None: st.markdown(f"- **Token Count:** {tokens}")
-                    if params is not None: st.markdown(f"- **Parameters:** {params}")
-                    if length is not None: st.markdown(f"- **Length (lines):** {length}")
-
                 used_imports = record.get("used_imports") or []
                 if isinstance(used_imports, str):
                     used_imports = json.loads(used_imports)
@@ -569,6 +545,57 @@ if st.session_state.summary:
                         st.code("\n".join(used_imports), language=syntax_lang)
                 else:
                     st.markdown("- **Used imports:** none detected")
+
+            # ── Code Metrics Table ────────────────────────────────────────────
+            # Code structure metrics — use stored values or compute on-the-fly
+            cc      = record.get("cyclomatic_complexity")
+            nloc    = record.get("nloc")
+            tokens  = record.get("token_count")
+            params  = record.get("parameter_count")
+            length  = record.get("length")
+            nesting = record.get("max_nesting_depth")
+            fan_in  = record.get("fan_in")
+            fan_out = record.get("fan_out")
+
+            if all(v is None for v in [cc, nloc, tokens, params, length, nesting, fan_in, fan_out]):
+                from sieve.core.extraction import _compute_code_metrics
+                metrics = _compute_code_metrics(
+                    record.get("source_code", ""), rec_lang
+                )
+                cc      = metrics.get("cyclomatic_complexity")
+                nloc    = metrics.get("nloc")
+                tokens  = metrics.get("token_count")
+                params  = metrics.get("parameter_count")
+                length  = metrics.get("length")
+                nesting = metrics.get("max_nesting_depth")
+                fan_in  = metrics.get("fan_in")
+                fan_out = metrics.get("fan_out")
+
+            metric_rows = [
+                ("Cyclomatic Complexity", cc,      "1 + number of branching statements (McCabe)"),
+                ("NLOC",                 nloc,     "Non-comment lines of code"),
+                ("Token Count",          tokens,   "Total number of tokens"),
+                ("Parameter Count",      params,   "Number of function/method parameters"),
+                ("Length (lines)",       length,   "Total lines including blanks and comments"),
+                ("Max Nesting Depth",    nesting,  "Maximum control flow nesting depth"),
+                ("Fan-in",               fan_in,   "Number of callers of this function"),
+                ("Fan-out",              fan_out,  "Number of functions called by this function"),
+            ]
+            metric_rows = [(m, v, d) for m, v, d in metric_rows if v is not None]
+
+            if metric_rows:
+                st.markdown("#### Code Structure Metrics")
+                metrics_df = pd.DataFrame(metric_rows, columns=["Metric", "Value", "Description"])
+                st.dataframe(
+                    metrics_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Metric":      st.column_config.TextColumn(width="medium"),
+                        "Value":       st.column_config.NumberColumn(width="small"),
+                        "Description": st.column_config.TextColumn(width="large"),
+                    }
+                )
 
             with code_col:
                 def _with_imports(code: str) -> str:

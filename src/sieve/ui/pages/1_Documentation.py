@@ -187,10 +187,11 @@ with tab_func:
     | `ast_num_nodes` | int \\| null | Total number of AST nodes |
     | `ast_node_types` | dict \\| null | Node type → count mapping |
     | `ast` | dict \\| null | Full AST as nested JSON (only when Export AST is enabled) |
-    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity (1 + number of branches) |
-    | `num_loops` | int \\| null | Number of loop statements (for, while) |
-    | `num_statements` | int \\| null | Number of statements in the function body |
-    | `max_nesting_depth` | int \\| null | Maximum control flow nesting depth |
+    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity (Lizard) |
+    | `nloc` | int \\| null | Non-comment lines of code (Lizard) |
+    | `token_count` | int \\| null | Total token count (Lizard) |
+    | `parameter_count` | int \\| null | Number of parameters (Lizard) |
+    | `length` | int \\| null | Function length in lines (Lizard) |
     """)
 
 with tab_class:
@@ -218,10 +219,11 @@ with tab_class:
     | `ast_num_nodes` | int \\| null | Total number of AST nodes |
     | `ast_node_types` | dict \\| null | Node type → count mapping |
     | `ast` | dict \\| null | Full AST as nested JSON (only when Export AST is enabled) |
-    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity (1 + number of branches) |
-    | `num_loops` | int \\| null | Number of loop statements (for, while) |
-    | `num_statements` | int \\| null | Number of statements in the class body |
-    | `max_nesting_depth` | int \\| null | Maximum control flow nesting depth |
+    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity (Lizard) |
+    | `nloc` | int \\| null | Non-comment lines of code (Lizard) |
+    | `token_count` | int \\| null | Total token count (Lizard) |
+    | `parameter_count` | int \\| null | Number of parameters — constructor only (Lizard) |
+    | `length` | int \\| null | Class length in lines (Lizard) |
     """)
 
 st.divider()
@@ -230,31 +232,36 @@ st.divider()
 
 st.header("Code Structure Metrics")
 st.markdown("""
-SIEVE computes four structural metrics from the AST of every extracted record.
-These are always populated — no extra configuration needed.
+SIEVE computes five structural metrics for every extracted record using the
+[Lizard](https://github.com/terryyin/lizard) library — a battle-tested,
+cross-language code complexity analyzer. These metrics are always populated
+for Python, Java, JavaScript, and C++ — no extra configuration needed.
 
 **Cyclomatic Complexity** (`cyclomatic_complexity`)
-McCabe's cyclomatic complexity — a measure of the number of linearly independent
-paths through the code. Computed as `1 + number of branching statements`
-(if/elif, for, while, switch/case, except, logical &&/||).
-A function with no branches has complexity 1. Higher values indicate more complex
-control flow and are generally harder to test and maintain.
+McCabe's cyclomatic complexity — the number of linearly independent paths
+through the code. Computed as `1 + number of branching statements`
+(if/elif, for, while, switch/case, except, logical &&/||). A function with
+no branches has complexity 1. Values above 10 are generally considered complex.
 
-**Loop Count** (`num_loops`)
-The number of loop statements (for, while, do-while) in the function or class body.
-Nested loops each count separately.
+**Non-Comment Lines of Code** (`nloc`)
+The number of lines of source code excluding blank lines and comment lines.
+A more accurate measure of actual code volume than raw LOC.
 
-**Statement Count** (`num_statements`)
-The number of executable statements — assignments, returns, raises, calls, etc.
-Does not count declarations, imports, or control structure keywords themselves.
+**Token Count** (`token_count`)
+The total number of tokens (keywords, identifiers, operators, literals) in
+the snippet. Correlates with code density and is used in Halstead metrics.
 
-**Max Nesting Depth** (`max_nesting_depth`)
-The maximum depth of nested control flow structures (if, for, while, try, with).
-A function with a for loop inside an if has depth 2. Deeply nested code (depth ≥ 4)
-is often a sign of complexity that could be refactored.
+**Parameter Count** (`parameter_count`)
+The number of parameters in the function signature. For classes, this reflects
+the constructor's parameter count (when only one function is present).
 
-These metrics are computed using tree-sitter — no external tools required — and
-are consistent across all four supported languages.
+**Length** (`length`)
+The total number of lines spanned by the function or class, including blank
+lines and comments within the body.
+
+These metrics are computed using Lizard and are consistent across all four
+supported languages. Lizard is used in production SE research and is available
+as a pip package (`pip install lizard`).
 """)
 
 st.divider()

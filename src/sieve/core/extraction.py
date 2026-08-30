@@ -50,6 +50,9 @@ class FunctionRecord:
     token_count: Optional[int] = None            # Total token count (lizard)
     parameter_count: Optional[int] = None        # Number of parameters (lizard)
     length: Optional[int] = None                 # Function length in lines (lizard)
+    max_nesting_depth: Optional[int] = None      # Maximum nesting depth (lizard)
+    fan_in: Optional[int] = None                 # Number of callers (lizard)
+    fan_out: Optional[int] = None                # Number of callees (lizard)
 
 
 @dataclass
@@ -81,6 +84,9 @@ class ClassRecord:
     token_count: Optional[int] = None            # Total token count (lizard)
     parameter_count: Optional[int] = None        # Number of parameters (lizard)
     length: Optional[int] = None                 # Length in lines (lizard)
+    max_nesting_depth: Optional[int] = None      # Maximum nesting depth (lizard)
+    fan_in: Optional[int] = None                 # Number of callers (lizard)
+    fan_out: Optional[int] = None                # Number of callees (lizard)
 
 
 # ─── Tree-sitter Setup ───────────────────────────────────────────────────────
@@ -240,6 +246,9 @@ def _compute_code_metrics(
                 "token_count":          result.token_count,
                 "parameter_count":      None,
                 "length":               None,
+                "max_nesting_depth":    None,
+                "fan_in":               None,
+                "fan_out":              None,
             }
 
         # Aggregate across all functions in the snippet
@@ -250,6 +259,9 @@ def _compute_code_metrics(
             "token_count":           result.token_count,
             "parameter_count":       fns[0].parameter_count if len(fns) == 1 else None,
             "length":                sum(f.length for f in fns),
+            "max_nesting_depth":     max(f.max_nesting_depth for f in fns),
+            "fan_in":                fns[0].fan_in  if len(fns) == 1 else None,
+            "fan_out":               fns[0].fan_out if len(fns) == 1 else None,
         }
 
     except Exception:
@@ -1576,6 +1588,9 @@ def extract_from_file(
         record.token_count           = metrics.get("token_count")
         record.parameter_count       = metrics.get("parameter_count")
         record.length                = metrics.get("length")
+        record.max_nesting_depth     = metrics.get("max_nesting_depth")
+        record.fan_in                = metrics.get("fan_in")
+        record.fan_out               = metrics.get("fan_out")
 
     return functions, classes
 
