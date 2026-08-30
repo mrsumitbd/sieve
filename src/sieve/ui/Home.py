@@ -547,41 +547,62 @@ if st.session_state.summary:
                     st.markdown("- **Used imports:** none detected")
 
             # ── Code Metrics Table ────────────────────────────────────────────
-            # Code structure metrics — use stored values or compute on-the-fly
-            cc      = record.get("cyclomatic_complexity")
-            nloc    = record.get("nloc")
-            tokens  = record.get("token_count")
-            params  = record.get("parameter_count")
-            length  = record.get("length")
-            nesting = record.get("max_nesting_depth")
-            fan_in  = record.get("fan_in")
-            fan_out = record.get("fan_out")
+            # Collect all metrics — compute on-the-fly if not in record
+            def _get_metrics(rec, lang):
+                m = {
+                    "loc":                   rec.get("loc"),
+                    "sloc":                  rec.get("sloc"),
+                    "lloc":                  rec.get("lloc"),
+                    "comments":              rec.get("comments"),
+                    "blank":                 rec.get("blank"),
+                    "comment_ratio":         rec.get("comment_ratio"),
+                    "cyclomatic_complexity": rec.get("cyclomatic_complexity"),
+                    "max_nesting_depth":     rec.get("max_nesting_depth"),
+                    "h1":                    rec.get("h1"),
+                    "h2":                    rec.get("h2"),
+                    "N1":                    rec.get("N1"),
+                    "N2":                    rec.get("N2"),
+                    "vocabulary":            rec.get("vocabulary"),
+                    "halstead_length":       rec.get("halstead_length"),
+                    "calculated_length":     rec.get("calculated_length"),
+                    "volume":                rec.get("volume"),
+                    "difficulty":            rec.get("difficulty"),
+                    "effort":                rec.get("effort"),
+                    "time":                  rec.get("time"),
+                    "bugs":                  rec.get("bugs"),
+                    "maintainability_index": rec.get("maintainability_index"),
+                }
+                if all(v is None for v in m.values()):
+                    from sieve.core.metrics import compute_metrics
+                    m = compute_metrics(rec.get("source_code", ""), lang)
+                return m
 
-            if all(v is None for v in [cc, nloc, tokens, params, length, nesting, fan_in, fan_out]):
-                from sieve.core.extraction import _compute_code_metrics
-                metrics = _compute_code_metrics(
-                    record.get("source_code", ""), rec_lang
-                )
-                cc      = metrics.get("cyclomatic_complexity")
-                nloc    = metrics.get("nloc")
-                tokens  = metrics.get("token_count")
-                params  = metrics.get("parameter_count")
-                length  = metrics.get("length")
-                nesting = metrics.get("max_nesting_depth")
-                fan_in  = metrics.get("fan_in")
-                fan_out = metrics.get("fan_out")
+            m = _get_metrics(record, rec_lang)
 
             metric_rows = [
-                ("Cyclomatic Complexity", cc,      "1 + number of branching statements (McCabe)"),
-                ("NLOC",                 nloc,     "Non-comment lines of code"),
-                ("Token Count",          tokens,   "Total number of tokens"),
-                ("Parameter Count",      params,   "Number of function/method parameters"),
-                ("Length (lines)",       length,   "Total lines including blanks and comments"),
-                ("Max Nesting Depth",    nesting,  "Maximum control flow nesting depth"),
-                ("Fan-in",               fan_in,   "Number of callers of this function"),
-                ("Fan-out",              fan_out,  "Number of functions called by this function"),
+                ("LOC",                     m.get("loc"),                   "Total lines of code"),
+                ("SLOC",                    m.get("sloc"),                  "Source lines (non-blank, non-comment)"),
+                ("LLOC",                    m.get("lloc"),                  "Logical lines of code (statements)"),
+                ("Comments",                m.get("comments"),              "Comment lines"),
+                ("Blank",                   m.get("blank"),                 "Blank lines"),
+                ("Comment Ratio",           m.get("comment_ratio"),         "Comment lines / LOC"),
+                ("Cyclomatic Complexity",   m.get("cyclomatic_complexity"), "McCabe: 1 + branching statements"),
+                ("Max Nesting Depth",       m.get("max_nesting_depth"),     "Maximum control flow nesting depth"),
+                ("h1 (Distinct Operators)", m.get("h1"),                    "Halstead: distinct operators"),
+                ("h2 (Distinct Operands)",  m.get("h2"),                    "Halstead: distinct operands"),
+                ("N1 (Total Operators)",    m.get("N1"),                    "Halstead: total operator occurrences"),
+                ("N2 (Total Operands)",     m.get("N2"),                    "Halstead: total operand occurrences"),
+                ("Vocabulary",              m.get("vocabulary"),            "Halstead: h1 + h2"),
+                ("Halstead Length",         m.get("halstead_length"),       "Halstead: N1 + N2"),
+                ("Calculated Length",       m.get("calculated_length"),     "Halstead: estimated length"),
+                ("Volume",                  m.get("volume"),                "Halstead: information content (bits)"),
+                ("Difficulty",              m.get("difficulty"),            "Halstead: difficulty to understand"),
+                ("Effort",                  m.get("effort"),                "Halstead: mental effort required"),
+                ("Time (s)",                m.get("time"),                  "Halstead: estimated programming time"),
+                ("Bugs",                    m.get("bugs"),                  "Halstead: estimated number of bugs"),
+                ("Maintainability Index",   m.get("maintainability_index"), "Composite score 0–100 (higher = more maintainable)"),
             ]
-            metric_rows = [(m, v, d) for m, v, d in metric_rows if v is not None]
+            metric_rows = [(label, val, desc) for label, val, desc in metric_rows if val is not None]
 
             if metric_rows:
                 st.markdown("#### Code Structure Metrics")

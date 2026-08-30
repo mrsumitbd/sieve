@@ -45,14 +45,29 @@ class FunctionRecord:
     ast_node_types: Optional[dict] = None  # Node type → count
     ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
     commit_sha: Optional[str] = None    # Git commit SHA at extraction time (for GitHub permalink)
-    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity (lizard)
-    nloc: Optional[int] = None                   # Non-comment lines of code (lizard)
-    token_count: Optional[int] = None            # Total token count (lizard)
-    parameter_count: Optional[int] = None        # Number of parameters (lizard)
-    length: Optional[int] = None                 # Function length in lines (lizard)
-    max_nesting_depth: Optional[int] = None      # Maximum nesting depth (lizard)
-    fan_in: Optional[int] = None                 # Number of callers (lizard)
-    fan_out: Optional[int] = None                # Number of callees (lizard)
+    # ── Code metrics (sieve.core.metrics) ────────────────────────────────────
+    loc: Optional[int] = None                    # Total lines of code
+    sloc: Optional[int] = None                   # Source lines of code (non-blank, non-comment)
+    lloc: Optional[int] = None                   # Logical lines of code (statements)
+    comments: Optional[int] = None               # Comment lines
+    multi: Optional[int] = None                  # Multi-line string/comment lines
+    blank: Optional[int] = None                  # Blank lines
+    comment_ratio: Optional[float] = None        # Ratio of comment lines to LOC
+    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity
+    max_nesting_depth: Optional[int] = None      # Maximum control flow nesting depth
+    h1: Optional[int] = None                     # Halstead: distinct operators
+    h2: Optional[int] = None                     # Halstead: distinct operands
+    N1: Optional[int] = None                     # Halstead: total operators
+    N2: Optional[int] = None                     # Halstead: total operands
+    vocabulary: Optional[int] = None             # Halstead: vocabulary (h1 + h2)
+    halstead_length: Optional[int] = None        # Halstead: length (N1 + N2)
+    calculated_length: Optional[float] = None    # Halstead: calculated length
+    volume: Optional[float] = None               # Halstead: volume
+    difficulty: Optional[float] = None           # Halstead: difficulty
+    effort: Optional[float] = None               # Halstead: effort
+    time: Optional[float] = None                 # Halstead: estimated programming time (seconds)
+    bugs: Optional[float] = None                 # Halstead: estimated bugs
+    maintainability_index: Optional[float] = None  # Maintainability Index (0-100)
 
 
 @dataclass
@@ -79,14 +94,29 @@ class ClassRecord:
     ast_node_types: Optional[dict] = None  # Node type → count
     ast: Optional[dict] = None          # Full AST as nested JSON (opt-in)
     commit_sha: Optional[str] = None    # Git commit SHA at extraction time (for GitHub permalink)
-    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity (lizard)
-    nloc: Optional[int] = None                   # Non-comment lines of code (lizard)
-    token_count: Optional[int] = None            # Total token count (lizard)
-    parameter_count: Optional[int] = None        # Number of parameters (lizard)
-    length: Optional[int] = None                 # Length in lines (lizard)
-    max_nesting_depth: Optional[int] = None      # Maximum nesting depth (lizard)
-    fan_in: Optional[int] = None                 # Number of callers (lizard)
-    fan_out: Optional[int] = None                # Number of callees (lizard)
+    # ── Code metrics (sieve.core.metrics) ────────────────────────────────────
+    loc: Optional[int] = None                    # Total lines of code
+    sloc: Optional[int] = None                   # Source lines of code (non-blank, non-comment)
+    lloc: Optional[int] = None                   # Logical lines of code (statements)
+    comments: Optional[int] = None               # Comment lines
+    multi: Optional[int] = None                  # Multi-line string/comment lines
+    blank: Optional[int] = None                  # Blank lines
+    comment_ratio: Optional[float] = None        # Ratio of comment lines to LOC
+    cyclomatic_complexity: Optional[int] = None  # McCabe cyclomatic complexity
+    max_nesting_depth: Optional[int] = None      # Maximum control flow nesting depth
+    h1: Optional[int] = None                     # Halstead: distinct operators
+    h2: Optional[int] = None                     # Halstead: distinct operands
+    N1: Optional[int] = None                     # Halstead: total operators
+    N2: Optional[int] = None                     # Halstead: total operands
+    vocabulary: Optional[int] = None             # Halstead: vocabulary (h1 + h2)
+    halstead_length: Optional[int] = None        # Halstead: length (N1 + N2)
+    calculated_length: Optional[float] = None    # Halstead: calculated length
+    volume: Optional[float] = None               # Halstead: volume
+    difficulty: Optional[float] = None           # Halstead: difficulty
+    effort: Optional[float] = None               # Halstead: effort
+    time: Optional[float] = None                 # Halstead: estimated programming time (seconds)
+    bugs: Optional[float] = None                 # Halstead: estimated bugs
+    maintainability_index: Optional[float] = None  # Maintainability Index (0-100)
 
 
 # ─── Tree-sitter Setup ───────────────────────────────────────────────────────
@@ -198,74 +228,6 @@ def _compute_ast_features(
     except Exception:
         return None, None, None, None
 
-
-def _compute_code_metrics(
-    source: str,
-    language: str,
-) -> dict:
-    """
-    Compute code structure metrics using the lizard library.
-    Works for Python, Java, JavaScript, and C++.
-
-    Returns a dict with:
-        cyclomatic_complexity, nloc, token_count,
-        parameter_count, length
-    All values are None if computation fails.
-    """
-    _LIZARD_LANG = {
-        "Python":     ".py",
-        "Java":       ".java",
-        "JavaScript": ".js",
-        "C++":        ".cpp",
-    }
-    ext = _LIZARD_LANG.get(language)
-    if ext is None:
-        return {}
-
-    try:
-        import lizard
-        import tempfile
-        import os
-
-        with tempfile.NamedTemporaryFile(
-            suffix=ext, mode="w", delete=False, encoding="utf-8"
-        ) as f:
-            f.write(source)
-            tmp = f.name
-
-        try:
-            result = lizard.analyze_file(tmp)
-        finally:
-            os.unlink(tmp)
-
-        if not result.function_list:
-            # File-level metrics when no functions found
-            return {
-                "cyclomatic_complexity": None,
-                "nloc":                 result.nloc,
-                "token_count":          result.token_count,
-                "parameter_count":      None,
-                "length":               None,
-                "max_nesting_depth":    None,
-                "fan_in":               None,
-                "fan_out":              None,
-            }
-
-        # Aggregate across all functions in the snippet
-        fns = result.function_list
-        return {
-            "cyclomatic_complexity": max(f.cyclomatic_complexity for f in fns),
-            "nloc":                  sum(f.nloc for f in fns),
-            "token_count":           result.token_count,
-            "parameter_count":       fns[0].parameter_count if len(fns) == 1 else None,
-            "length":                sum(f.length for f in fns),
-            "max_nesting_depth":     max(f.max_nesting_depth for f in fns),
-            "fan_in":                fns[0].fan_in  if len(fns) == 1 else None,
-            "fan_out":               fns[0].fan_out if len(fns) == 1 else None,
-        }
-
-    except Exception:
-        return {}
 
 
 def _clean_indentation(snippet: str) -> str:
@@ -1582,15 +1544,30 @@ def extract_from_file(
         record.ast_node_types = node_types
         record.ast            = ast_json
 
-        metrics = _compute_code_metrics(record.source_code, language)
-        record.cyclomatic_complexity = metrics.get("cyclomatic_complexity")
-        record.nloc                  = metrics.get("nloc")
-        record.token_count           = metrics.get("token_count")
-        record.parameter_count       = metrics.get("parameter_count")
-        record.length                = metrics.get("length")
-        record.max_nesting_depth     = metrics.get("max_nesting_depth")
-        record.fan_in                = metrics.get("fan_in")
-        record.fan_out               = metrics.get("fan_out")
+        from sieve.core.metrics import compute_metrics
+        m = compute_metrics(record.source_code, language)
+        record.loc                   = m.get("loc")
+        record.sloc                  = m.get("sloc")
+        record.lloc                  = m.get("lloc")
+        record.comments              = m.get("comments")
+        record.multi                 = m.get("multi")
+        record.blank                 = m.get("blank")
+        record.comment_ratio         = m.get("comment_ratio")
+        record.cyclomatic_complexity = m.get("cyclomatic_complexity")
+        record.max_nesting_depth     = m.get("max_nesting_depth")
+        record.h1                    = m.get("h1")
+        record.h2                    = m.get("h2")
+        record.N1                    = m.get("N1")
+        record.N2                    = m.get("N2")
+        record.vocabulary            = m.get("vocabulary")
+        record.halstead_length       = m.get("halstead_length")
+        record.calculated_length     = m.get("calculated_length")
+        record.volume                = m.get("volume")
+        record.difficulty            = m.get("difficulty")
+        record.effort                = m.get("effort")
+        record.time                  = m.get("time")
+        record.bugs                  = m.get("bugs")
+        record.maintainability_index = m.get("maintainability_index")
 
     return functions, classes
 

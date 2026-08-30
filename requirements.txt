@@ -21,4 +21,3 @@ huggingface_hub>=0.20.0
 transformers>=4.38.0
 torch>=2.1.0
 sentencepiece>=0.1.99
-lizard>=1.17.0
