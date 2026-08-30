@@ -187,11 +187,28 @@ with tab_func:
     | `ast_num_nodes` | int \\| null | Total number of AST nodes |
     | `ast_node_types` | dict \\| null | Node type → count mapping |
     | `ast` | dict \\| null | Full AST as nested JSON (only when Export AST is enabled) |
-    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity (Lizard) |
-    | `nloc` | int \\| null | Non-comment lines of code (Lizard) |
-    | `token_count` | int \\| null | Total token count (Lizard) |
-    | `parameter_count` | int \\| null | Number of parameters (Lizard) |
-    | `length` | int \\| null | Function length in lines (Lizard) |
+    | `loc` | int \\| null | Total lines of code |
+    | `sloc` | int \\| null | Source lines (non-blank, non-comment) |
+    | `lloc` | int \\| null | Logical lines of code (statements) |
+    | `comments` | int \\| null | Comment lines |
+    | `multi` | int \\| null | Multi-line string/comment lines |
+    | `blank` | int \\| null | Blank lines |
+    | `comment_ratio` | float \\| null | Comment lines / LOC |
+    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity |
+    | `max_nesting_depth` | int \\| null | Maximum control flow nesting depth |
+    | `h1` | int \\| null | Halstead: distinct operators |
+    | `h2` | int \\| null | Halstead: distinct operands |
+    | `N1` | int \\| null | Halstead: total operators |
+    | `N2` | int \\| null | Halstead: total operands |
+    | `vocabulary` | int \\| null | Halstead: h1 + h2 |
+    | `halstead_length` | int \\| null | Halstead: N1 + N2 |
+    | `calculated_length` | float \\| null | Halstead: calculated length |
+    | `volume` | float \\| null | Halstead: volume |
+    | `difficulty` | float \\| null | Halstead: difficulty |
+    | `effort` | float \\| null | Halstead: effort |
+    | `time` | float \\| null | Halstead: estimated programming time (seconds) |
+    | `bugs` | float \\| null | Halstead: estimated number of bugs |
+    | `maintainability_index` | float \\| null | Maintainability Index (0–100) |
     """)
 
 with tab_class:
@@ -219,11 +236,28 @@ with tab_class:
     | `ast_num_nodes` | int \\| null | Total number of AST nodes |
     | `ast_node_types` | dict \\| null | Node type → count mapping |
     | `ast` | dict \\| null | Full AST as nested JSON (only when Export AST is enabled) |
-    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity (Lizard) |
-    | `nloc` | int \\| null | Non-comment lines of code (Lizard) |
-    | `token_count` | int \\| null | Total token count (Lizard) |
-    | `parameter_count` | int \\| null | Number of parameters — constructor only (Lizard) |
-    | `length` | int \\| null | Class length in lines (Lizard) |
+    | `loc` | int \\| null | Total lines of code |
+    | `sloc` | int \\| null | Source lines (non-blank, non-comment) |
+    | `lloc` | int \\| null | Logical lines of code (statements) |
+    | `comments` | int \\| null | Comment lines |
+    | `multi` | int \\| null | Multi-line string/comment lines |
+    | `blank` | int \\| null | Blank lines |
+    | `comment_ratio` | float \\| null | Comment lines / LOC |
+    | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity |
+    | `max_nesting_depth` | int \\| null | Maximum control flow nesting depth |
+    | `h1` | int \\| null | Halstead: distinct operators |
+    | `h2` | int \\| null | Halstead: distinct operands |
+    | `N1` | int \\| null | Halstead: total operators |
+    | `N2` | int \\| null | Halstead: total operands |
+    | `vocabulary` | int \\| null | Halstead: h1 + h2 |
+    | `halstead_length` | int \\| null | Halstead: N1 + N2 |
+    | `calculated_length` | float \\| null | Halstead: calculated length |
+    | `volume` | float \\| null | Halstead: volume |
+    | `difficulty` | float \\| null | Halstead: difficulty |
+    | `effort` | float \\| null | Halstead: effort |
+    | `time` | float \\| null | Halstead: estimated programming time (seconds) |
+    | `bugs` | float \\| null | Halstead: estimated number of bugs |
+    | `maintainability_index` | float \\| null | Maintainability Index (0–100) |
     """)
 
 st.divider()
@@ -232,36 +266,58 @@ st.divider()
 
 st.header("Code Structure Metrics")
 st.markdown("""
-SIEVE computes five structural metrics for every extracted record using the
-[Lizard](https://github.com/terryyin/lizard) library — a battle-tested,
-cross-language code complexity analyzer. These metrics are always populated
-for Python, Java, JavaScript, and C++ — no extra configuration needed.
+SIEVE computes **23 structural metrics** for every extracted record using its own
+tree-sitter-based metrics engine (`sieve.core.metrics`). All metrics are computed
+from isolated code snippets — no external tools required — and are consistent
+across all four supported languages.
 
-**Cyclomatic Complexity** (`cyclomatic_complexity`)
-McCabe's cyclomatic complexity — the number of linearly independent paths
-through the code. Computed as `1 + number of branching statements`
-(if/elif, for, while, switch/case, except, logical &&/||). A function with
-no branches has complexity 1. Values above 10 are generally considered complex.
+#### Raw Metrics
 
-**Non-Comment Lines of Code** (`nloc`)
-The number of lines of source code excluding blank lines and comment lines.
-A more accurate measure of actual code volume than raw LOC.
+| Metric | Description |
+|--------|-------------|
+| `loc` | Total lines of code |
+| `sloc` | Source lines (non-blank, non-comment) |
+| `lloc` | Logical lines of code — number of statement nodes |
+| `comments` | Number of single-line comment lines |
+| `multi` | Number of multi-line comment/docstring lines |
+| `blank` | Number of blank lines |
+| `comment_ratio` | Comment lines / LOC |
 
-**Token Count** (`token_count`)
-The total number of tokens (keywords, identifiers, operators, literals) in
-the snippet. Correlates with code density and is used in Halstead metrics.
+#### Complexity Metrics
 
-**Parameter Count** (`parameter_count`)
-The number of parameters in the function signature. For classes, this reflects
-the constructor's parameter count (when only one function is present).
+| Metric | Description |
+|--------|-------------|
+| `cyclomatic_complexity` | McCabe complexity: 1 + number of branching statements (if/elif, for, while, except, logical &&/\\|\\|, comprehensions) |
+| `max_nesting_depth` | Maximum depth of nested control flow structures (if, for, while, try, with) |
 
-**Length** (`length`)
-The total number of lines spanned by the function or class, including blank
-lines and comments within the body.
+#### Halstead Metrics
 
-These metrics are computed using Lizard and are consistent across all four
-supported languages. Lizard is used in production SE research and is available
-as a pip package (`pip install lizard`).
+Halstead metrics are derived from the count of distinct and total operators
+and operands in the source code.
+
+| Metric | Description |
+|--------|-------------|
+| `h1` | Distinct operators |
+| `h2` | Distinct operands |
+| `N1` | Total operator occurrences |
+| `N2` | Total operand occurrences |
+| `vocabulary` | h1 + h2 |
+| `halstead_length` | N1 + N2 |
+| `calculated_length` | h1·log₂(h1) + h2·log₂(h2) |
+| `volume` | (N1+N2)·log₂(h1+h2) — information content in bits |
+| `difficulty` | (h1/2)·(N2/h2) — difficulty to understand |
+| `effort` | difficulty × volume |
+| `time` | effort / 18 — estimated programming time in seconds |
+| `bugs` | volume / 3000 — estimated number of delivered bugs |
+
+#### Composite Metric
+
+| Metric | Description |
+|--------|-------------|
+| `maintainability_index` | Score from 0 to 100 — higher is more maintainable. Derived from Halstead volume, cyclomatic complexity, and SLOC using the Radon/SEI formula. |
+
+All metrics are computed entirely from the tree-sitter AST — no lizard, radon,
+or other external tools are required at runtime.
 """)
 
 st.divider()
