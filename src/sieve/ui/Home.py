@@ -437,39 +437,48 @@ if st.session_state.summary:
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
         # ── Dependency Graph ──────────────────────────────────────────────────
-        repos_with_deps = [
-            m for m in s.get("repo_metadata", [])
-            if m.get("dependencies")
-        ]
-        if repos_with_deps:
+        all_repo_meta = s.get("repo_metadata", [])
+        if all_repo_meta:
             st.markdown("#### 📦 Dependency Graph")
-            repo_names = [m["full_name"] for m in repos_with_deps]
-            selected   = st.selectbox(
-                "Select repository",
-                options=repo_names,
-                key="dep_repo_select",
+            show_deps = st.toggle(
+                "Show dependency graph",
+                value=False,
+                help=(
+                    "Parse and display direct package dependencies for each "
+                    "repository. Supports requirements.txt, package.json, "
+                    "pom.xml, conanfile.txt, vcpkg.json, and CMakeLists.txt."
+                ),
             )
-            selected_meta = next(
-                m for m in repos_with_deps if m["full_name"] == selected
-            )
-            deps = selected_meta.get("dependencies", [])
-            with st.expander(
-                f"📦 {selected} — {len(deps)} direct dependencies",
-                expanded=True,
-            ):
-                if deps:
-                    from sieve.ui.dep_viz import render_dep_graph
-                    st.components.v1.html(
-                        render_dep_graph(deps, selected, height=420),
-                        height=420,
-                        scrolling=False,
-                    )
-                    # Also show as table
-                    dep_df = pd.DataFrame(deps)[["name", "version", "kind"]]
-                    dep_df.columns = ["Package", "Version", "Kind"]
-                    st.dataframe(dep_df, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No dependency manifest found for this repository.")
+            if show_deps:
+                repo_names = [m["full_name"] for m in all_repo_meta]
+                selected   = st.selectbox(
+                    "Select repository",
+                    options=repo_names,
+                    key="dep_repo_select",
+                )
+                selected_meta = next(
+                    m for m in all_repo_meta if m["full_name"] == selected
+                )
+                deps = selected_meta.get("dependencies", [])
+                label = (f"📦 {selected} — {len(deps)} direct dependencies"
+                         if deps else f"📦 {selected} — no manifest found")
+                with st.expander(label, expanded=True):
+                    if deps:
+                        from sieve.ui.dep_viz import render_dep_graph
+                        st.components.v1.html(
+                            render_dep_graph(deps, selected, height=420),
+                            height=420,
+                            scrolling=False,
+                        )
+                        dep_df = pd.DataFrame(deps)[["name", "version", "kind"]]
+                        dep_df.columns = ["Package", "Version", "Kind"]
+                        st.dataframe(dep_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info(
+                            "No dependency manifest found for this repository. "
+                            "SIEVE looks for `requirements.txt`, `package.json`, "
+                            "`pom.xml`, `conanfile.txt`, `vcpkg.json`, and `CMakeLists.txt`."
+                        )
 
     st.divider()
     st.subheader("🎲 Random Sample Viewer")

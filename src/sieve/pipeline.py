@@ -330,42 +330,64 @@ def run_pipeline(
         func_caps  = {}
         class_caps = {}
 
-    # Pass 2 — Extract with caps
+    # Pass 2 — Extract with buffered caps (cap * 2, max cap + 50)
+    # Extract more than allocated and cache the surplus for Pass 3,
+    # avoiding re-clones entirely in most shortfall cases.
+    BUFFER_FACTOR = 2
+    BUFFER_MAX    = 50
+
+    def _buffered_cap(cap: int) -> int:
+        if cap is None:
+            return None
+        return min(cap * BUFFER_FACTOR, cap + BUFFER_MAX)
+
     _progress("Pass 2: Extracting code with per-repository caps...")
+
+    # Surplus cache: repo_name -> (surplus_funcs, surplus_classes)
+    surplus_cache: dict[str, tuple[list, list]] = {}
+
     for idx, repo_meta in enumerate(repos_to_process):
         repo_name = repo_meta.full_name
         _progress(f"[{idx+1}/{total}] Processing {repo_name}", idx + 1, total)
 
         qm = quality_map.get(repo_name)
 
-        # Per-repo caps from stratified allocation
+        # Per-repo caps — extract with buffer
         fc = func_caps.get(repo_name)
         cc = class_caps.get(repo_name)
 
         funcs, classes, meta_dict = _process_repo(
             repo_meta, config, qm,
-            func_cap=fc,
-            class_cap=cc,
+            func_cap=_buffered_cap(fc),
+            class_cap=_buffered_cap(cc),
         )
 
         if meta_dict is None:
             failed_repos.append(repo_name)
             continue
 
+        # Split into allocated and surplus
+        allocated_funcs   = funcs[:fc]   if fc is not None else funcs
+        surplus_funcs     = funcs[fc:]   if fc is not None else []
+        allocated_classes = classes[:cc] if cc is not None else classes
+        surplus_classes   = classes[cc:] if cc is not None else []
+
+        surplus_cache[repo_name] = (surplus_funcs, surplus_classes)
+
         _progress(
-            f"  {repo_name}: {len(funcs)} functions, {len(classes)} classes",
+            f"  {repo_name}: {len(allocated_funcs)} functions, "
+            f"{len(allocated_classes)} classes "
+            f"(+{len(surplus_funcs)} / +{len(surplus_classes)} cached)",
             idx + 1, total,
         )
 
-        all_functions.extend(funcs)
-        all_classes.extend(classes)
+        all_functions.extend(allocated_funcs)
+        all_classes.extend(allocated_classes)
         repo_metadata_list.append(meta_dict)
         time.sleep(0.2)
 
     # ── Pass 3: Shortfall redistribution ─────────────────────────────────────
-    # If we're short of the target (e.g. a repo returned 0 despite having a
-    # slot allocated), redistribute the missing slots to repos with remaining
-    # capacity and re-extract from them.
+    # Pull from surplus cache first; only re-clone if cache exhausted.
 
     func_shortfall  = (config.max_functions - len(all_functions)
                        if config.max_functions is not None else 0)
@@ -378,7 +400,6 @@ def run_pipeline(
             f"({func_shortfall} functions, {class_shortfall} classes)..."
         )
 
-        # Existing record keys for deduplication
         existing_func_keys  = {
             (r.repo, r.file_path, r.start_line) for r in all_functions
         }
@@ -386,75 +407,20 @@ def run_pipeline(
             (r.repo, r.file_path, r.start_line) for r in all_classes
         }
 
-        # Repos with remaining capacity — sorted by available remainder desc
-        def _remaining(repo_name, counts, caps, extracted):
-            available = counts.get(repo_name, 0)
-            actual    = extracted.get(repo_name, 0)
-            return max(0, available - actual)
-
-        repo_extracted_funcs   = {}
-        repo_extracted_classes = {}
-        for r in all_functions:
-            repo_extracted_funcs[r.repo] = repo_extracted_funcs.get(r.repo, 0) + 1
-        for r in all_classes:
-            repo_extracted_classes[r.repo] = repo_extracted_classes.get(r.repo, 0) + 1
-
-        # Repos that returned 0 in Pass 2 despite having an allocation are
-        # proven empty after filtering — skip them to avoid wasteful re-clones
-        proven_empty_funcs  = {
-            repo for repo, alloc in func_caps.items()
-            if alloc > 0 and repo_extracted_funcs.get(repo, 0) == 0
-        }
-        proven_empty_classes = {
-            repo for repo, alloc in class_caps.items()
-            if alloc > 0 and repo_extracted_classes.get(repo, 0) == 0
-        }
-
-        candidate_repos = sorted(
-            repos_to_process,
-            key=lambda m: -max(
-                _remaining(m.full_name, repo_func_counts,  func_caps,  repo_extracted_funcs),
-                _remaining(m.full_name, repo_class_counts, class_caps, repo_extracted_classes),
-            )
-        )
-
-        for repo_meta in candidate_repos:
+        # Step 3a: Pull from surplus cache (no re-clone needed)
+        for repo_name, (surplus_funcs, surplus_classes) in surplus_cache.items():
             if func_shortfall <= 0 and class_shortfall <= 0:
                 break
 
-            repo_name = repo_meta.full_name
+            new_funcs = [
+                r for r in surplus_funcs
+                if (r.repo, r.file_path, r.start_line) not in existing_func_keys
+            ][:func_shortfall]
 
-            # Skip repos proven empty in Pass 2
-            needs_funcs   = func_shortfall > 0  and repo_name not in proven_empty_funcs
-            needs_classes = class_shortfall > 0 and repo_name not in proven_empty_classes
-
-            if not needs_funcs and not needs_classes:
-                continue
-
-            add_fc = min(func_shortfall,  _remaining(repo_name, repo_func_counts,  func_caps,  repo_extracted_funcs)) if needs_funcs  else 0
-            add_cc = min(class_shortfall, _remaining(repo_name, repo_class_counts, class_caps, repo_extracted_classes)) if needs_classes else 0
-
-            # Skip if no remaining capacity after filtering
-            if add_fc <= 0 and add_cc <= 0:
-                continue
-
-            qm = quality_map.get(repo_name)
-            extra_fc  = (repo_extracted_funcs.get(repo_name, 0)  + add_fc)  if add_fc  > 0 else None
-            extra_cc  = (repo_extracted_classes.get(repo_name, 0) + add_cc) if add_cc  > 0 else None
-
-            funcs, classes, _ = _process_repo(
-                repo_meta, config, qm,
-                func_cap=extra_fc,
-                class_cap=extra_cc,
-            )
-
-            # Add only new records not already extracted
-            new_funcs   = [r for r in funcs   if (r.repo, r.file_path, r.start_line) not in existing_func_keys]
-            new_classes = [r for r in classes if (r.repo, r.file_path, r.start_line) not in existing_class_keys]
-
-            # Trim to exact shortfall
-            new_funcs   = new_funcs[:func_shortfall]
-            new_classes = new_classes[:class_shortfall]
+            new_classes = [
+                r for r in surplus_classes
+                if (r.repo, r.file_path, r.start_line) not in existing_class_keys
+            ][:class_shortfall]
 
             all_functions.extend(new_funcs)
             all_classes.extend(new_classes)
@@ -469,8 +435,86 @@ def run_pipeline(
 
             if new_funcs or new_classes:
                 _progress(
-                    f"  {repo_name}: +{len(new_funcs)} functions, +{len(new_classes)} classes"
+                    f"  {repo_name}: +{len(new_funcs)} functions, "
+                    f"+{len(new_classes)} classes (from cache)"
                 )
+
+        # Step 3b: If still short, re-clone repos with remaining capacity
+        # Skip repos proven empty in Pass 2 to avoid wasteful re-clones
+        if func_shortfall > 0 or class_shortfall > 0:
+            repo_extracted_funcs   = {}
+            repo_extracted_classes = {}
+            for r in all_functions:
+                repo_extracted_funcs[r.repo]   = repo_extracted_funcs.get(r.repo, 0) + 1
+            for r in all_classes:
+                repo_extracted_classes[r.repo] = repo_extracted_classes.get(r.repo, 0) + 1
+
+            proven_empty_funcs = {
+                repo for repo, alloc in func_caps.items()
+                if alloc > 0 and repo_extracted_funcs.get(repo, 0) == 0
+            }
+            proven_empty_classes = {
+                repo for repo, alloc in class_caps.items()
+                if alloc > 0 and repo_extracted_classes.get(repo, 0) == 0
+            }
+
+            def _remaining(repo_name, counts, extracted):
+                return max(0, counts.get(repo_name, 0) - extracted.get(repo_name, 0))
+
+            candidate_repos = sorted(
+                repos_to_process,
+                key=lambda m: -max(
+                    _remaining(m.full_name, repo_func_counts,  repo_extracted_funcs),
+                    _remaining(m.full_name, repo_class_counts, repo_extracted_classes),
+                )
+            )
+
+            for repo_meta in candidate_repos:
+                if func_shortfall <= 0 and class_shortfall <= 0:
+                    break
+
+                repo_name     = repo_meta.full_name
+                needs_funcs   = func_shortfall  > 0 and repo_name not in proven_empty_funcs
+                needs_classes = class_shortfall > 0 and repo_name not in proven_empty_classes
+
+                if not needs_funcs and not needs_classes:
+                    continue
+
+                add_fc = min(func_shortfall,  _remaining(repo_name, repo_func_counts,  repo_extracted_funcs))  if needs_funcs   else 0
+                add_cc = min(class_shortfall, _remaining(repo_name, repo_class_counts, repo_extracted_classes)) if needs_classes else 0
+
+                if add_fc <= 0 and add_cc <= 0:
+                    continue
+
+                qm = quality_map.get(repo_name)
+                extra_fc = (repo_extracted_funcs.get(repo_name,   0) + add_fc) if add_fc > 0 else None
+                extra_cc = (repo_extracted_classes.get(repo_name, 0) + add_cc) if add_cc > 0 else None
+
+                funcs, classes, _ = _process_repo(
+                    repo_meta, config, qm,
+                    func_cap=extra_fc,
+                    class_cap=extra_cc,
+                )
+
+                new_funcs   = [r for r in funcs   if (r.repo, r.file_path, r.start_line) not in existing_func_keys][:func_shortfall]
+                new_classes = [r for r in classes if (r.repo, r.file_path, r.start_line) not in existing_class_keys][:class_shortfall]
+
+                all_functions.extend(new_funcs)
+                all_classes.extend(new_classes)
+
+                for r in new_funcs:
+                    existing_func_keys.add((r.repo, r.file_path, r.start_line))
+                for r in new_classes:
+                    existing_class_keys.add((r.repo, r.file_path, r.start_line))
+
+                func_shortfall  -= len(new_funcs)
+                class_shortfall -= len(new_classes)
+
+                if new_funcs or new_classes:
+                    _progress(
+                        f"  {repo_name}: +{len(new_funcs)} functions, "
+                        f"+{len(new_classes)} classes (re-cloned)"
+                    )
 
     # ── Phase 4: Deduplication ────────────────────────────────────────────────
 
