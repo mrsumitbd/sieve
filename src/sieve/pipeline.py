@@ -105,6 +105,13 @@ def _process_repo(
                 for r in funcs + classes:
                     r.commit_sha = commit_sha
 
+            # Parse direct dependencies from manifest files
+            from sieve.core.dependencies import parse_dependencies
+            try:
+                dependencies = parse_dependencies(clone_path, config.language)
+            except Exception:
+                dependencies = []
+
             # Build metadata dict
             meta_dict = {
                 "full_name": repo_meta.full_name,
@@ -118,6 +125,7 @@ def _process_repo(
                 "collected_at": repo_meta.collected_at,
                 "topics": repo_meta.topics,
                 "test_suite": test_report.to_dict(),
+                "dependencies": dependencies,
             }
 
             if quality_metrics:
@@ -289,14 +297,16 @@ def run_pipeline(
             total_available = sum(counts.values())
             if total_available == 0:
                 return {r: 0 for r in counts}
-            # Initial proportional allocation
+            # Initial proportional allocation — min 1 only for repos that have content
             caps = {}
             for repo, cnt in counts.items():
-                caps[repo] = max(1, round(cnt / total_available * total_cap))
+                if cnt == 0:
+                    caps[repo] = 0
+                else:
+                    caps[repo] = max(1, round(cnt / total_available * total_cap))
             # Adjust to match exact total — distribute remainder to largest repos
             current_total = sum(caps.values())
             diff = current_total - total_cap
-            # Sort by count descending for fair adjustment
             sorted_repos = sorted(counts.keys(), key=lambda r: -counts[r])
             i = 0
             while diff > 0:
@@ -379,16 +389,26 @@ def run_pipeline(
         # Repos with remaining capacity — sorted by available remainder desc
         def _remaining(repo_name, counts, caps, extracted):
             available = counts.get(repo_name, 0)
-            allocated = caps.get(repo_name, 0)
             actual    = extracted.get(repo_name, 0)
             return max(0, available - actual)
 
-        repo_extracted_funcs   = {r.repo: 0 for r in all_functions}
-        repo_extracted_classes = {r.repo: 0 for r in all_classes}
+        repo_extracted_funcs   = {}
+        repo_extracted_classes = {}
         for r in all_functions:
             repo_extracted_funcs[r.repo] = repo_extracted_funcs.get(r.repo, 0) + 1
         for r in all_classes:
             repo_extracted_classes[r.repo] = repo_extracted_classes.get(r.repo, 0) + 1
+
+        # Repos that returned 0 in Pass 2 despite having an allocation are
+        # proven empty after filtering — skip them to avoid wasteful re-clones
+        proven_empty_funcs  = {
+            repo for repo, alloc in func_caps.items()
+            if alloc > 0 and repo_extracted_funcs.get(repo, 0) == 0
+        }
+        proven_empty_classes = {
+            repo for repo, alloc in class_caps.items()
+            if alloc > 0 and repo_extracted_classes.get(repo, 0) == 0
+        }
 
         candidate_repos = sorted(
             repos_to_process,
@@ -403,9 +423,18 @@ def run_pipeline(
                 break
 
             repo_name = repo_meta.full_name
-            add_fc = min(func_shortfall,  _remaining(repo_name, repo_func_counts,  func_caps,  repo_extracted_funcs))
-            add_cc = min(class_shortfall, _remaining(repo_name, repo_class_counts, class_caps, repo_extracted_classes))
 
+            # Skip repos proven empty in Pass 2
+            needs_funcs   = func_shortfall > 0  and repo_name not in proven_empty_funcs
+            needs_classes = class_shortfall > 0 and repo_name not in proven_empty_classes
+
+            if not needs_funcs and not needs_classes:
+                continue
+
+            add_fc = min(func_shortfall,  _remaining(repo_name, repo_func_counts,  func_caps,  repo_extracted_funcs)) if needs_funcs  else 0
+            add_cc = min(class_shortfall, _remaining(repo_name, repo_class_counts, class_caps, repo_extracted_classes)) if needs_classes else 0
+
+            # Skip if no remaining capacity after filtering
             if add_fc <= 0 and add_cc <= 0:
                 continue
 
@@ -520,6 +549,7 @@ def run_pipeline(
         "failed_repos": failed_repos,
         "output_paths": output_paths,
         "output_dir": config.output_dir,
+        "repo_metadata": repo_metadata_list,
         # Per-repo counts for charts
         "repo_stats": [
             {

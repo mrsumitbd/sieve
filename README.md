@@ -12,7 +12,7 @@ pinned: false
 **Software Ingestion & Extraction for Verifiable Evaluation**
 
 [![Coverage](https://codecov.io/gh/mrsumitbd/sieve/graph/badge.svg?token=19aecee5-afb0-4d67-9c0d-bdab723ce8d3)](https://codecov.io/gh/mrsumitbd/sieve)
-![Tests](https://img.shields.io/badge/tests-361%20passed-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-409%20passed-brightgreen?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![Languages](https://img.shields.io/badge/languages-Python%20%7C%20Java%20%7C%20JavaScript%20%7C%20C%2B%2B-orange?style=flat-square)
@@ -222,6 +222,21 @@ A JSON file capturing the full config, per-repo metadata, and summary statistics
 
 ---
 
+## Dependency Graph
+
+SIEVE automatically parses package dependency manifests from each cloned repository and stores them in the corpus manifest. The web UI shows an interactive force-directed dependency graph in the Dataset Statistics panel, with packages colored by kind (main, dev, optional).
+
+Supported manifest formats:
+
+| Language | Manifest Files |
+|---|---|
+| Python | `requirements*.txt`, `requirements/*.txt`, `pyproject.toml`, `setup.cfg` |
+| JavaScript | `package.json` (dependencies, devDependencies, peerDependencies) |
+| Java | `pom.xml` (Maven) |
+| C++ | `conanfile.txt`, `vcpkg.json`, `CMakeLists.txt` (find_package) |
+
+---
+
 ## Code Metrics
 
 SIEVE computes 23 structural metrics for every extracted record using tree-sitter — no external tools required, consistent across all four languages:
@@ -244,6 +259,12 @@ pytest --cov=sieve --cov-report=term-missing
 ```
 
 The suite covers 361 tests across unit, integration, and end-to-end levels. GitHub and git are mocked — no network access required.
+
+---
+
+## Known Limitations
+
+**C++ parsing is slower than other languages.** C++ extraction takes 2–5× longer than Python, Java, or JavaScript repositories of comparable size. This is a known limitation of `tree-sitter-cpp` — C++ has fundamental syntactic ambiguities (e.g. `a * b` can be a multiplication or a pointer declaration) that require Generalized LR (GLR) parsing to resolve at runtime, which is more expensive than the deterministic LR(1) parsing used for the other languages. See the [Documentation page](https://mrahman2025-sieve.hf.space) for details.
 
 ---
 

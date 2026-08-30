@@ -534,6 +534,85 @@ with st.expander("What is the LLM Score field?"):
 
 st.divider()
 
+# ─── Dependency Graph ─────────────────────────────────────────────────────────
+
+st.header("Dependency Graph")
+st.markdown("""
+After a pipeline run, the **Dataset Statistics** panel includes an interactive
+dependency graph for each processed repository. The graph shows direct package
+dependencies parsed from the repository's manifest files, colored by kind:
+
+| Color | Kind | Description |
+|---|---|---|
+| 🔵 Blue | Main | Runtime dependencies |
+| 🟣 Purple | Dev | Development/test dependencies |
+| 🟠 Orange | Optional | Peer or optional dependencies |
+
+The center node (red) represents the repository itself. Drag nodes to explore
+the graph; use scroll to zoom.
+
+**Supported manifest formats:**
+
+| Language | Files Parsed |
+|---|---|
+| Python | `requirements*.txt`, `requirements/*.txt`, `pyproject.toml` (PEP 508 + Poetry), `setup.cfg` |
+| JavaScript | `package.json` — `dependencies`, `devDependencies`, `peerDependencies` |
+| Java | `pom.xml` (Maven) — `<dependency>` blocks, scope-aware |
+| C++ | `conanfile.txt` (Conan `[requires]`), `vcpkg.json`, `CMakeLists.txt` (`find_package`) |
+
+Only **direct** dependencies are shown — transitive dependencies require
+network access to package registries and are not computed.
+
+Dependencies are stored in the corpus `manifest.json` under each repo's
+`dependencies` key, so they can be used for downstream analysis even without
+the UI.
+""")
+
+st.divider()
+
+# ─── C++ Parsing Performance ──────────────────────────────────────────────────
+
+st.header("C++ Parsing Performance")
+st.markdown("""
+C++ extraction is significantly slower than Python, Java, and JavaScript. This is
+a known limitation of tree-sitter's C++ grammar, not a SIEVE-specific issue.
+Three factors contribute:
+
+**1. Inherent grammar ambiguity.** The C++ language contains fundamental syntactic
+ambiguities that cannot be resolved without type information. For example,
+`a * b` is syntactically ambiguous between a multiplication expression and a
+pointer-type declaration — the correct parse depends on whether `a` is a variable
+or a type name, which may be defined in an included header file not available
+at parse time. The `tree-sitter-cpp` grammar explicitly documents this class of
+ambiguity ([issue #74](https://github.com/tree-sitter/tree-sitter-cpp/issues/74)).
+
+**2. GLR parsing overhead.** Tree-sitter resolves C++ ambiguities at runtime using
+the Generalized LR (GLR) algorithm, which explores multiple parse trees in parallel
+and merges them when they reconverge. This parallel exploration is more expensive
+than the deterministic LR(1) parsing used for Python, Java, and JavaScript.
+Tree-sitter's documentation notes that performance is best when grammars are close
+to the LR(1) class — C++ is far from it.
+
+**3. Grammar size.** The `tree-sitter-cpp` grammar is substantially larger and more
+complex than the grammars for the other three supported languages. C++ is widely
+recognized as one of the most difficult languages to parse due to its size and
+context sensitivity.
+
+**Practical impact on SIEVE:** C++ repositories take 2–5× longer to extract than
+Python or JavaScript repositories of comparable size. This affects the two-pass
+extraction (both Pass 1 counting and Pass 2 extraction), and is most noticeable
+on large repos like `godotengine/godot` or `opencv/opencv`. Setting a reasonable
+`Max Repos` cap (≤ 20) and using per-repo function/class caps mitigates the
+impact.
+
+**References:**
+- tree-sitter-cpp issue tracker: [C++ grammar is ambiguous](https://github.com/tree-sitter/tree-sitter-cpp/issues/74)
+- Semgrep (2024): [Modernizing Static Analysis for C/C++](https://semgrep.dev/blog/2024/modernizing-static-analysis-for-c/) — describes GLR overhead in C++ parsing
+- Mathew (2025): [Designing Effective Tree-sitter Grammars](https://medium.com/@linz07m/designing-effective-tree-sitter-grammars-84411ebdf830) — LR(1) vs GLR performance tradeoffs
+""")
+
+st.divider()
+
 # ─── How Detection Works ──────────────────────────────────────────────────────
 
 st.header("How Test Suite Detection Works")

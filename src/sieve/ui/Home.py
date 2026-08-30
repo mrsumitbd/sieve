@@ -55,9 +55,10 @@ def load_demo_dataset() -> dict:
             "classes_jsonl":   str(cl_path),
             "manifest":        str(_DEMO_DIR / "manifest.json"),
         },
-        "output_dir":  str(_DEMO_DIR),
-        "repo_stats":  manifest["repo_stats"],
-        "_is_demo":    True,
+        "output_dir":    str(_DEMO_DIR),
+        "repo_stats":    manifest["repo_stats"],
+        "repo_metadata": manifest.get("repo_metadata", []),
+        "_is_demo":      True,
     }
 
 
@@ -435,7 +436,40 @@ if st.session_state.summary:
             ]
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # ── Random Sample Viewer ──────────────────────────────────────────────────
+        # ── Dependency Graph ──────────────────────────────────────────────────
+        repos_with_deps = [
+            m for m in s.get("repo_metadata", [])
+            if m.get("dependencies")
+        ]
+        if repos_with_deps:
+            st.markdown("#### 📦 Dependency Graph")
+            repo_names = [m["full_name"] for m in repos_with_deps]
+            selected   = st.selectbox(
+                "Select repository",
+                options=repo_names,
+                key="dep_repo_select",
+            )
+            selected_meta = next(
+                m for m in repos_with_deps if m["full_name"] == selected
+            )
+            deps = selected_meta.get("dependencies", [])
+            with st.expander(
+                f"📦 {selected} — {len(deps)} direct dependencies",
+                expanded=True,
+            ):
+                if deps:
+                    from sieve.ui.dep_viz import render_dep_graph
+                    st.components.v1.html(
+                        render_dep_graph(deps, selected, height=420),
+                        height=420,
+                        scrolling=False,
+                    )
+                    # Also show as table
+                    dep_df = pd.DataFrame(deps)[["name", "version", "kind"]]
+                    dep_df.columns = ["Package", "Version", "Kind"]
+                    st.dataframe(dep_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No dependency manifest found for this repository.")
 
     st.divider()
     st.subheader("🎲 Random Sample Viewer")
