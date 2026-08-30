@@ -180,6 +180,35 @@ with st.expander("Can I run SIEVE locally via the command line?"):
     CLI documentation.
     """)
 
+with st.expander("Why do I see repos with the Unlicense even with Engineered Projects enabled?"):
+    st.markdown("""
+    The Engineered Projects filter's license check (Stage 1) only excludes
+    **non-software licenses** — Creative Commons variants (CC-BY, CC0, CC-BY-SA)
+    and font licenses (OFL-1.1). These are associated with documentation sites,
+    datasets, and font projects rather than software.
+
+    The **Unlicense** is a valid software license — a public domain dedication
+    equivalent to "no restrictions on use." It is commonly used by legitimate,
+    production-quality software projects. Its presence does not indicate a non-software
+    repository, so SIEVE correctly allows it through Stage 1.
+
+    If you want to exclude Unlicense repos, post-filter the manifest using the
+    `license_spdx` field:
+
+    ```python
+    import json
+
+    ALLOWED = {"MIT", "Apache-2.0", "GPL-2.0-only", "GPL-3.0-only",
+               "BSD-2-Clause", "BSD-3-Clause", "LGPL-2.1-only", "ISC"}
+
+    with open("manifest.json") as f:
+        manifest = json.load(f)
+
+    filtered = [r for r in manifest["repos"]
+                if r.get("license_spdx") in ALLOWED]
+    ```
+    """)
+
 with st.expander("Why does a repository show 0 functions/methods or 0 classes?"):
     st.markdown("""
     This is expected behavior — not a bug. There are several reasons a repository

@@ -119,8 +119,16 @@ Enabling **Engineered Projects Only** applies a three-stage quality filter based
 ([Munaiah et al., 2017](https://doi.org/10.1007/s10664-017-9512-6)):
 
 **Stage 1 — License exclusion.** Repos with non-software licenses are excluded:
-`CC-BY-4.0`, `CC0-1.0`, `CC-BY-SA-4.0`, `OFL-1.1`, and repos with no license.
-These are typically documentation, datasets, or font projects.
+`CC-BY-4.0`, `CC0-1.0`, `CC-BY-SA-4.0`, `OFL-1.1` (SIL Open Font License),
+and repos with no license at all.
+These are typically documentation sites, datasets, or font projects — not software.
+
+**Which licenses are kept?** All standard software licenses pass Stage 1, including
+MIT, Apache-2.0, GPL-2.0, GPL-3.0, BSD-2-Clause, BSD-3-Clause, LGPL, MPL-2.0,
+ISC, AGPL-3.0, and **Unlicense**. The Unlicense is a public domain dedication for
+software (equivalent to "no restrictions") and is treated as a valid software license.
+Its presence does not indicate a non-software repo — many legitimate, production-quality
+software projects use it.
 
 **Stage 2 — Hard thresholds.** Repos with zero releases or fewer than 2 contributors
 are excluded unconditionally.
