@@ -99,11 +99,11 @@ def _parse_pyproject_toml_regex(path: Path) -> list[dict]:
     """Regex fallback for pyproject.toml."""
     deps = []
     text = path.read_text(encoding="utf-8", errors="replace")
-    # Match dependencies = ["pkg>=1.0", ...]
     m = re.search(r'dependencies\s*=\s*\[([^\]]*)\]', text, re.DOTALL)
     if m:
         for item in re.findall(r'"([^"]+)"', m.group(1)):
-            pm = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]*)?", item)
+            item_clean = re.sub(r"\[[^\]]*\]", "", item).strip()
+            pm = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]+)?", item_clean)
             if pm:
                 deps.append({
                     "name":    pm.group(1).strip(),
@@ -140,12 +140,12 @@ def _parse_python_deps(repo_path: Path) -> list[dict]:
             m = re.search(r"install_requires\s*=\s*((?:\n\s+[^\n]+)+)", text)
             if m:
                 for line in m.group(1).strip().splitlines():
-                    line = line.strip()
-                    pm = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]*)?", line)
+                    line = re.sub(r"\[[^\]]*\]", "", line.strip()).strip()
+                    pm = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]+)?", line)
                     if pm and pm.group(1):
                         deps.append({
                             "name":    pm.group(1).strip(),
-                            "version": pm.group(2).strip() or None,
+                            "version": pm.group(2).strip() if pm.group(2) else None,
                             "kind":    "main",
                         })
         except Exception:

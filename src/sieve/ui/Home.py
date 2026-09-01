@@ -501,6 +501,7 @@ if st.session_state.summary:
                             scrolling=False,
                         )
                         dep_df = pd.DataFrame(deps)[["name", "version", "kind"]]
+                        dep_df["version"] = dep_df["version"].fillna("latest")
                         dep_df.columns = ["Package", "Version", "Kind"]
                         st.dataframe(dep_df, use_container_width=True, hide_index=True)
                     else:

@@ -615,7 +615,7 @@ def run_pipeline(
     )
 
     _summary_msg = (
-        f"✅ {_engineered_str} repos mined in {_elapsed_str}. "
+        f"{_engineered_str} repos mined in {_elapsed_str}. "
         f"Average: {_rate:.1f} repos/min."
     )
 
