@@ -53,7 +53,8 @@ def _parse_pyproject_toml(path: Path) -> list[dict]:
         project = data.get("project", {})
 
         for dep in project.get("dependencies", []):
-            m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*\[\]]*)?", dep)
+            dep_clean = re.sub(r"\[[^\]]*\]", "", dep).strip()
+            m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]+)?", dep_clean)
             if m:
                 deps.append({
                     "name":    m.group(1).strip(),
@@ -64,7 +65,8 @@ def _parse_pyproject_toml(path: Path) -> list[dict]:
         opt = project.get("optional-dependencies", {})
         for group, group_deps in opt.items():
             for dep in group_deps:
-                m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*\[\]]*)?", dep)
+                dep_clean = re.sub(r"\[[^\]]*\]", "", dep).strip()
+                m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]+)?", dep_clean)
                 if m:
                     deps.append({
                         "name":    m.group(1).strip(),

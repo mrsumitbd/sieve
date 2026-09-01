@@ -308,7 +308,9 @@ if run_button:
             try:
                 summary = run_pipeline(config, progress_callback=progress_callback)
                 st.session_state.summary = summary
-                status.update(label="✅ Pipeline complete!", state="complete", expanded=False)
+                _pipeline_summary = summary.get("pipeline_summary", "")
+                _status_label = f"✅ Pipeline complete! {_pipeline_summary}"
+                status.update(label=_status_label, state="complete", expanded=False)
             except Exception as e:
                 st.session_state.error = str(e)
                 status.update(label="❌ Pipeline failed", state="error", expanded=True)
@@ -317,7 +319,10 @@ if run_button:
 # ─── Persistent Pipeline Log ─────────────────────────────────────────────────
 
 if st.session_state.pipeline_log:
-    with st.expander("✅ Pipeline complete!", expanded=False):
+    _summary = st.session_state.get("summary") or {}
+    _pipeline_summary = _summary.get("pipeline_summary", "")
+    _expander_label = f"✅ Pipeline complete! {_pipeline_summary}"
+    with st.expander(_expander_label, expanded=False):
         st.code("\n".join(st.session_state.pipeline_log), language=None)
 
 
@@ -465,7 +470,7 @@ if st.session_state.summary:
         all_repo_meta = s.get("repo_metadata", [])
         if all_repo_meta:
             show_deps = st.toggle(
-                "📦 Show Dependency Graph",
+                "Show Dependency Graph",
                 value=False,
                 help=(
                     "Parse and display direct package dependencies for each "

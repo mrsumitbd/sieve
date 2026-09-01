@@ -223,6 +223,7 @@ def run_pipeline(
     _progress("Starting repo discovery...")
 
     all_discovered: list[RepoMetadata] = []
+    _last_progress_time = _time.time()
     for repo_meta in discover_repos(
         language=config.language,
         start_date=config.start_date,
@@ -234,9 +235,10 @@ def run_pipeline(
         min_last_activity=config.min_last_activity,
     ):
         all_discovered.append(repo_meta)
-        n = len(all_discovered)
-        if n % 5 == 0 or n == 1:
-            _progress(f"  Discovered {n} repos so far... (latest: {repo_meta.full_name})")
+        now = _time.time()
+        if now - _last_progress_time >= 10:
+            _progress(f"  Discovering... {len(all_discovered)} repos found so far")
+            _last_progress_time = now
 
     total_discovered = len(all_discovered)
     _discovery_elapsed = _time.time() - _discovery_start
@@ -388,8 +390,7 @@ def run_pipeline(
 
         _progress(
             f"  {repo_name}: {len(allocated_funcs)} functions, "
-            f"{len(allocated_classes)} classes "
-            f"(+{len(surplus_funcs)} / +{len(surplus_classes)} cached)",
+            f"{len(allocated_classes)} classes",
             idx + 1, total,
         )
 
@@ -613,6 +614,11 @@ def run_pipeline(
         else f"{_repos_processed}"
     )
 
+    _summary_msg = (
+        f"✅ {_engineered_str} repos mined in {_elapsed_str}. "
+        f"Average: {_rate:.1f} repos/min."
+    )
+
     _progress(
         f"Pipeline complete — {_engineered_str} repos mined in {_elapsed_str}. "
         f"Average: {_rate:.1f} repos/min."
@@ -626,6 +632,7 @@ def run_pipeline(
         "total_functions": len(all_functions),
         "total_classes": len(all_classes),
         "elapsed_seconds": round(_total_elapsed, 1),
+        "pipeline_summary": _summary_msg,
         "failed_repos": failed_repos,
         "output_paths": output_paths,
         "output_dir": config.output_dir,
@@ -646,5 +653,4 @@ def run_pipeline(
         ],
     }
 
-    _progress("Pipeline complete.", total, total)
     return summary
