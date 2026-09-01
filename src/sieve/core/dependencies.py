@@ -33,8 +33,10 @@ def _parse_requirements_txt(path: Path) -> list[dict]:
         line = line.split("#")[0].strip()
         if not line:
             continue
+        # Strip extras specifier (e.g. requests[security] -> requests)
+        line_no_extras = re.sub(r"\[[^\]]*\]", "", line).strip()
         # Parse name and version constraint
-        m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]*)?", line)
+        m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]+)?", line_no_extras)
         if m:
             name    = m.group(1).strip()
             version = m.group(2).strip() if m.group(2) else None
@@ -44,16 +46,8 @@ def _parse_requirements_txt(path: Path) -> list[dict]:
 
 def _parse_pyproject_toml(path: Path) -> list[dict]:
     """Parse dependencies from pyproject.toml."""
+    import tomllib
     deps = []
-    try:
-        import tomllib
-    except ImportError:
-        try:
-            import tomli as tomllib
-        except ImportError:
-            # Fall back to regex parsing
-            return _parse_pyproject_toml_regex(path)
-
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8", errors="replace"))
         project = data.get("project", {})

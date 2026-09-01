@@ -464,9 +464,8 @@ if st.session_state.summary:
         # ── Dependency Graph ──────────────────────────────────────────────────
         all_repo_meta = s.get("repo_metadata", [])
         if all_repo_meta:
-            st.markdown("#### 📦 Dependency Graph")
             show_deps = st.toggle(
-                "Show dependency graph",
+                "📦 Show Dependency Graph",
                 value=False,
                 help=(
                     "Parse and display direct package dependencies for each "
@@ -475,6 +474,7 @@ if st.session_state.summary:
                 ),
             )
             if show_deps:
+                st.markdown("#### 📦 Dependency Graph")
                 repo_names = [m["full_name"] for m in all_repo_meta]
                 selected   = st.selectbox(
                     "Select repository",

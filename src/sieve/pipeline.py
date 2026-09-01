@@ -208,6 +208,9 @@ def run_pipeline(
         if progress_callback:
             progress_callback(msg, current, total)
 
+    import time as _time
+    _pipeline_start = _time.time()
+
     all_functions: list[FunctionRecord] = []
     all_classes: list[ClassRecord] = []
     repo_metadata_list: list[dict] = []
@@ -215,9 +218,12 @@ def run_pipeline(
 
     # ── Phase 1: Discovery ────────────────────────────────────────────────────
 
+    import time as _time
+    _discovery_start = _time.time()
     _progress("Starting repo discovery...")
 
-    all_discovered: list[RepoMetadata] = list(discover_repos(
+    all_discovered: list[RepoMetadata] = []
+    for repo_meta in discover_repos(
         language=config.language,
         start_date=config.start_date,
         end_date=config.end_date,
@@ -226,10 +232,15 @@ def run_pipeline(
         max_repos=config.max_repos,
         github_token=config.github_token,
         min_last_activity=config.min_last_activity,
-    ))
+    ):
+        all_discovered.append(repo_meta)
+        n = len(all_discovered)
+        if n % 5 == 0 or n == 1:
+            _progress(f"  Discovered {n} repos so far... (latest: {repo_meta.full_name})")
 
     total_discovered = len(all_discovered)
-    _progress(f"Discovered {total_discovered} candidate repositories.")
+    _discovery_elapsed = _time.time() - _discovery_start
+    _progress(f"Discovered {total_discovered} candidate repositories in {_discovery_elapsed:.1f}s.")
 
     # ── Phase 2 (conditional): Engineered project filtering ───────────────────
 
@@ -584,13 +595,37 @@ def run_pipeline(
         repo_metadata_list=repo_metadata_list,
     )
 
+    _total_elapsed = _time.time() - _pipeline_start
+    _repos_processed = len(repo_metadata_list)
+    _rate = (_repos_processed / (_total_elapsed / 60)) if _total_elapsed > 0 else 0
+
+    # Format elapsed time
+    if _total_elapsed < 60:
+        _elapsed_str = f"{_total_elapsed:.1f}s"
+    elif _total_elapsed < 3600:
+        _elapsed_str = f"{_total_elapsed/60:.1f}min"
+    else:
+        _elapsed_str = f"{_total_elapsed/3600:.1f}h"
+
+    _engineered_str = (
+        f"{_repos_processed} engineered out of {total_discovered}"
+        if config.engineered_only
+        else f"{_repos_processed}"
+    )
+
+    _progress(
+        f"Pipeline complete — {_engineered_str} repos mined in {_elapsed_str}. "
+        f"Average: {_rate:.1f} repos/min."
+    )
+
     summary = {
         "total_repos_discovered": total_discovered,
         "total_repos_after_quality_filter": len(repos_to_process),
-        "total_repos_processed": len(repo_metadata_list),
+        "total_repos_processed": _repos_processed,
         "total_repos_failed": len(failed_repos),
         "total_functions": len(all_functions),
         "total_classes": len(all_classes),
+        "elapsed_seconds": round(_total_elapsed, 1),
         "failed_repos": failed_repos,
         "output_paths": output_paths,
         "output_dir": config.output_dir,
