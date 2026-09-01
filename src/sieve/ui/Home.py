@@ -106,18 +106,42 @@ with st.sidebar:
         index=0,
     )
 
+    # Default end_date = one month before today
+    _default_end = date.today().replace(day=1) - __import__("datetime").timedelta(days=1)
+    _default_end = _default_end.replace(day=1)  # first of last month
+
     start_date = st.date_input(
         "Start Date",
         value=date(2024, 1, 1),
-        help="Only include repos with last commit on or after this date.",
+        help=(
+            "Repo **creation** date lower bound. Only repos created on or after "
+            "this date are included. Set this to the LLM training cutoff date to "
+            "guarantee contamination-free code."
+        ),
     )
     end_date = st.date_input(
         "End Date",
-        value=date.today(),
-        help="Only include repos with last commit on or before this date.",
+        value=_default_end,
+        help=(
+            "Repo **creation** date upper bound. Only repos created on or before "
+            "this date are included. Default: one month before today, to avoid "
+            "very new repos with little code."
+        ),
     )
     if end_date < start_date:
         st.error("End Date must be on or after Start Date.")
+
+    min_last_activity = st.date_input(
+        "Min Last Activity",
+        value=date.today(),
+        help=(
+            "Only include repos that have been pushed to on or after this date. "
+            "Ensures repos are actively maintained. Must be on or after End Date. "
+            "Default: today (no lower bound on activity)."
+        ),
+    )
+    if min_last_activity < end_date:
+        st.error("Min Last Activity cannot be before End Date.")
 
     st.subheader("Repository Filters")
     min_stars        = st.number_input("Minimum Stars",        min_value=0, value=50,  step=10)
@@ -249,6 +273,7 @@ if run_button:
                 language=language,
                 start_date=start_date,
                 end_date=end_date,
+                min_last_activity=min_last_activity,
                 min_stars=int(min_stars),
                 min_contributors=int(min_contributors),
                 max_repos=int(max_repos)     if max_repos     > 0 else None,
@@ -729,8 +754,9 @@ with st.expander("📋 Current Configuration (JSON)"):
     try:
         config_preview = {
             "language":         language,
-            "start_date":       str(start_date),
-            "end_date":         str(end_date),
+            "start_date":           str(start_date),
+            "end_date":             str(end_date),
+            "min_last_activity":    str(min_last_activity),
             "min_stars":        int(min_stars),
             "min_contributors": int(min_contributors),
             "max_repos":        int(max_repos)      if max_repos      > 0 else None,

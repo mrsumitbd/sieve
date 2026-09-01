@@ -26,14 +26,22 @@ class ExportFormat(str, Enum):
 class SIEVEConfig(BaseModel):
     # --- Core filters ---
     language: Language = Field(..., description="Target programming language")
-    start_date: date = Field(..., description="Only include repos with last commit on or after this date")
-    end_date: date = Field(..., description="Only include repos with last commit on or before this date")
+    start_date: date = Field(..., description="Only include repos created on or after this date (contamination cutoff)")
+    end_date: date = Field(..., description="Only include repos created on or before this date (default: one month before today)")
+    min_last_activity: Optional[date] = Field(default=None, description="Only include repos with last push on or after this date (default: same as end_date)")
 
     @field_validator("end_date")
     @classmethod
     def end_after_start(cls, v, info):
         if "start_date" in info.data and v < info.data["start_date"]:
             raise ValueError("end_date must be on or after start_date")
+        return v
+
+    @field_validator("min_last_activity")
+    @classmethod
+    def activity_after_end(cls, v, info):
+        if v is not None and "end_date" in info.data and v < info.data["end_date"]:
+            raise ValueError("min_last_activity cannot be before end_date")
         return v
 
     # --- Repo quality filters ---

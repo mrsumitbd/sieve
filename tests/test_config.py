@@ -44,6 +44,29 @@ class TestDefaults:
         with pytest.raises(ValidationError):
             SIEVEConfig(language="Python", start_date=date(2024, 1, 1))
 
+    def test_min_last_activity_defaults_to_none(self):
+        cfg = SIEVEConfig(language="Python", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1))
+        assert cfg.min_last_activity is None
+
+    def test_min_last_activity_can_be_set(self):
+        cfg = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            min_last_activity=date(2025, 6, 1),
+        )
+        assert cfg.min_last_activity == date(2025, 6, 1)
+
+    def test_min_last_activity_cannot_be_before_end_date(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            SIEVEConfig(
+                language="Python",
+                start_date=date(2024, 1, 1),
+                end_date=date(2025, 1, 1),
+                min_last_activity=date(2024, 6, 1),
+            )
+
     def test_granularity_default(self):
         cfg = SIEVEConfig(language="Python", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1))
         assert "function" in cfg.granularity

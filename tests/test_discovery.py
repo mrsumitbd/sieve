@@ -15,17 +15,30 @@ from sieve.core.discovery import _build_query, _get_contributor_count
 
 
 class TestBuildQuery:
-    def test_pushed_range_format(self):
+    def test_created_range_format(self):
         q = _build_query("Python", date(2024, 1, 1), date(2025, 3, 9), 50)
-        m = re.search(r"pushed:(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})", q)
+        m = re.search(r"created:(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})", q)
         assert m is not None
         assert m.group(1) == "2024-01-01"
         assert m.group(2) == "2025-03-09"
 
+    def test_pushed_activity_filter_present(self):
+        q = _build_query("Python", date(2024, 1, 1), date(2025, 3, 9), 50)
+        assert "pushed:>=" in q
+
     def test_single_day_range(self):
         q = _build_query("Java", date(2024, 6, 15), date(2024, 6, 15), 10)
-        m = re.search(r"pushed:(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})", q)
+        m = re.search(r"created:(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})", q)
         assert m.group(1) == m.group(2) == "2024-06-15"
+
+    def test_min_last_activity_overrides_default(self):
+        q = _build_query("Python", date(2024, 1, 1), date(2025, 1, 1), 10,
+                         min_last_activity=date(2025, 6, 1))
+        assert "pushed:>=2025-06-01" in q
+
+    def test_min_last_activity_defaults_to_end_date(self):
+        q = _build_query("Python", date(2024, 1, 1), date(2025, 1, 1), 10)
+        assert "pushed:>=2025-01-01" in q
 
     def test_stars_filter(self):
         q = _build_query("Python", date(2024, 1, 1), date(2025, 1, 1), 100)

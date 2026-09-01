@@ -161,7 +161,9 @@ class TestRunCommand:
         assert "[1/3]" in result.output
 
     def test_run_end_date_defaults_when_omitted(self):
-        """When --end-date is omitted, today's date should be used without error."""
+        """When --end-date is omitted, first of last month should be used."""
+        from datetime import timedelta
+        _default_end = (date.today().replace(day=1) - timedelta(days=1)).replace(day=1)
         with patch("sieve.cli.run_pipeline", return_value=_FAKE_SUMMARY) as mock:
             result = runner.invoke(app, [
                 "run",
@@ -170,7 +172,7 @@ class TestRunCommand:
             ])
         assert result.exit_code == 0
         called_config = mock.call_args[0][0]
-        assert called_config.end_date == date.today()
+        assert called_config.end_date == _default_end
 
     def test_run_optional_flags_passed_through(self):
         with patch("sieve.cli.run_pipeline", return_value=_FAKE_SUMMARY) as mock:
