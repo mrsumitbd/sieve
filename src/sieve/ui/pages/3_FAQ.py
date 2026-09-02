@@ -19,7 +19,72 @@ st.divider()
 
 st.subheader("General")
 
-with st.expander("What is SIEVE?"):
+with st.expander("What is data contamination and why does it matter?"):
+    st.markdown("""
+    **Data contamination** occurs when code used to evaluate an LLM was part of
+    its pre-training data. Because LLMs are trained on massive scrapes of public
+    GitHub repositories, any code that existed publicly before the model's training
+    cutoff date may have been memorized — and a model that reproduces memorized
+    code will appear more capable than it actually is.
+
+    This has been empirically documented:
+
+    - **For code generation:** LLMs achieve 84–89% correctness on widely-used
+      synthetic benchmarks (e.g. HumanEval), but only **25–34%** on real-world
+      class-level tasks drawn from open-source repositories
+      *(Rahman et al., arXiv:2510.26130, under review at EMSE)*.
+      The gap exists because synthetic benchmarks are fixed, well-known, and
+      likely seen during training.
+
+    - **For LLM-generated code detection:** A detection classifier shows
+      **significant performance degradation** when evaluated on post-cutoff
+      (unseen) data compared to pre-cutoff (potentially seen) data
+      *(Rahman et al., arXiv:2409.01382)*. Contamination in the evaluation set
+      produces overly optimistic detection results.
+
+    Reviewers at major SE venues (EMSE, TSE, ICSE, FSE, ASE) now routinely
+    require authors to demonstrate that their evaluation data is contamination-free.
+    """)
+
+with st.expander("How does SIEVE guarantee contamination-free data?"):
+    st.markdown("""
+    SIEVE filters repositories by **creation date** using the GitHub `created:`
+    search qualifier. A repository created after an LLM's training cutoff date
+    **cannot have existed** when the model was trained — making every function
+    and class extracted from it contamination-free by construction.
+
+    This is stronger than filtering by last push date (`pushed:`), which would
+    still include repositories created before the cutoff that were merely updated
+    after it. Old code in those repos could still be in the training data.
+
+    **How to use it:** Set **Start Date** to the training cutoff of the LLM(s)
+    you are evaluating. All extracted code will be from repositories that
+    post-date that cutoff.
+    """)
+
+with st.expander("What training cutoff dates should I use?"):
+    st.markdown("""
+    Use the published or estimated training cutoff of the model(s) you are studying:
+
+    | Model | Approximate Training Cutoff |
+    |---|---|
+    | GPT-3.5 (ChatGPT) | September 2021 |
+    | GPT-4 | April 2023 |
+    | GPT-4o | October 2023 |
+    | Claude 3 (Haiku/Sonnet/Opus) | August 2023 |
+    | Claude 3.5 Sonnet | April 2024 |
+    | Gemini 1.5 Pro | November 2023 |
+    | Llama 3 (8B/70B) | December 2023 |
+    | CodeLlama | January 2023 |
+
+    If evaluating multiple models, use the **latest** cutoff among them to
+    guarantee contamination-free data for all models simultaneously.
+
+    When submitting papers, you can state:
+    > *"Our evaluation corpus was built using SIEVE, collecting only from
+    > repositories created after [DATE]. By construction, no extracted code
+    > could have appeared in the pre-training data of any evaluated model."*
+    """)
     st.markdown("""
     **SIEVE** (Software Ingestion & Extraction for Verifiable Evaluation) is a
     parameterized GitHub corpus builder for software engineering research. It

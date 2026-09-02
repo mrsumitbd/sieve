@@ -19,7 +19,78 @@ st.divider()
 
 # ─── Overview ─────────────────────────────────────────────────────────────────
 
-st.header("What is SIEVE?")
+st.header("Contamination-Aware Evaluation")
+st.markdown("""
+### The Problem
+
+Large language models (LLMs) are pre-trained on massive corpora scraped from GitHub,
+Stack Overflow, and other public sources. The training data typically has a **cutoff
+date** — a point after which new data was not ingested. Any code that existed publicly
+before that cutoff may have been seen during pre-training.
+
+This creates a contamination problem for evaluation:
+
+> If you evaluate an LLM on code it has already seen during training, the model may
+> reproduce memorized solutions rather than demonstrate genuine generalization. The
+> result is an inflated, unreliable performance estimate.
+
+This is not hypothetical. Research has shown:
+
+1. **For code generation:** LLMs achieve 84–89% correctness on widely-used synthetic
+   benchmarks (e.g. HumanEval, MBPP) but only **25–34%** on real-world class-level
+   code generation tasks drawn from open-source repositories
+   *(Rahman et al., "Beyond Synthetic Benchmarks", arXiv:2510.26130, under review at EMSE)*.
+   The synthetic benchmarks are closed, well-known, and likely represented in training
+   data — producing optimistic results that do not reflect real-world capability.
+
+2. **For LLM-generated code detection:** A classifier trained to distinguish
+   human-written from AI-generated code shows **significant performance degradation**
+   when evaluated on post-cutoff data compared to pre-cutoff data
+   *(Rahman et al., arXiv:2409.01382)*.
+   Contamination in the evaluation set makes detection appear more accurate than it is
+   — a critical issue given that reviewers now routinely require contamination checks.
+
+### How SIEVE Solves This
+
+SIEVE filters repositories by **creation date**, not last push date. A repository
+created after an LLM's training cutoff **cannot have existed** when the model was
+trained — making every function and class extracted from it contamination-free by
+construction.
+
+### How to Choose Your Cutoff Date
+
+Set **Start Date** to the training cutoff of the LLM(s) you are studying. Some
+reference points:
+
+| Model | Approximate Training Cutoff |
+|---|---|
+| GPT-3.5 (ChatGPT) | September 2021 |
+| GPT-4 | April 2023 |
+| GPT-4o | October 2023 |
+| Claude 3 (Haiku/Sonnet/Opus) | August 2023 |
+| Claude 3.5 Sonnet | April 2024 |
+| Gemini 1.5 Pro | November 2023 |
+| Llama 3 (8B/70B) | December 2023 |
+| CodeLlama | January 2023 |
+
+If studying multiple models simultaneously, use the **latest** cutoff among them
+to guarantee contamination-free data for all.
+
+### Reviewer Checklist
+
+When submitting papers that use SIEVE-generated corpora, you can state:
+
+> *"Our evaluation corpus was built using SIEVE, collecting only from GitHub
+> repositories created after [DATE]. By construction, no extracted code could have
+> appeared in the pre-training data of any model evaluated, as the repositories did
+> not exist at the time of training."*
+
+This satisfies the contamination check now required by most SE venues.
+""")
+
+st.divider()
+
+# ─── What is SIEVE? ───────────────────────────────────────────────────────────
 st.markdown("""
 SIEVE is a parameterized GitHub corpus builder for software engineering research.
 It addresses a core validity threat in LLM-based code studies: **benchmark contamination**.

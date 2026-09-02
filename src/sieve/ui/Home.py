@@ -93,6 +93,17 @@ for key in ("summary", "error", "sample", "output_dir_path", "pipeline_log"):
 st.title("🔬 SIEVE")
 st.caption("**S**oftware **I**ngestion & **E**xtraction for **V**erifiable **E**valuation")
 st.markdown("Curate contamination-aware code corpora from GitHub for SE research.")
+
+st.info(
+    "**Why contamination-free data matters** — "
+    "LLMs trained on public GitHub code may \"remember\" any repository that existed "
+    "before their training cutoff. Evaluating on that code produces inflated, unreliable "
+    "results. SIEVE collects only from repositories **created after your specified cutoff**, "
+    "guaranteeing no overlap with training data. "
+    "See the **Documentation** page for the full rationale and how to choose your cutoff date.",
+    icon="🛡️",
+)
+
 st.divider()
 
 # ─── Sidebar: Parameter Form ─────────────────────────────────────────────────
