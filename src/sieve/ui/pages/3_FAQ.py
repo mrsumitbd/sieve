@@ -258,6 +258,45 @@ with st.expander("Why does a repository show 0 functions/methods or 0 classes?")
 
 st.subheader("Citation")
 
+with st.expander("The tool crashes or becomes unresponsive during a large run. What should I do?"):
+    st.markdown("""
+    SIEVE is hosted on HuggingFace Spaces with **16 GB RAM**. For very large runs,
+    the process can exhaust available memory and crash. This is expected behavior —
+    not a bug.
+
+    **Common causes:**
+    - Discovering thousands of repos (large date windows + low star thresholds)
+    - Processing very large repos like `godotengine/godot`, `tensorflow/tensorflow`,
+      or `home-assistant/core` which can contain 100,000+ extractable functions
+    - Running with C++ which is significantly slower and more memory-intensive due
+      to tree-sitter's GLR parser
+
+    **Recommended approach — process in batches:**
+
+    Instead of one large run, split your corpus into smaller batches:
+
+    ```python
+    # Instead of one run for all of 2024:
+    # start_date=2024-01-01, end_date=2024-12-31
+
+    # Run in quarterly batches:
+    # Batch 1: start_date=2024-01-01, end_date=2024-03-31
+    # Batch 2: start_date=2024-04-01, end_date=2024-06-30
+    # Batch 3: start_date=2024-07-01, end_date=2024-09-30
+    # Batch 4: start_date=2024-10-01, end_date=2024-12-31
+    ```
+
+    **Other tips:**
+    - Set **Max Repos** to 20–50 per run
+    - Set **Max Functions** and **Max Classes** caps — these trigger SIEVE's
+      two-pass extraction which prevents loading entire repos into memory
+    - Avoid combining large date windows with low star thresholds (e.g. min_stars=5)
+      which can return thousands of repos
+    - For C++, use smaller batches than for other languages
+
+    The manifest files from each batch can be combined for downstream analysis.
+    """)
+
 with st.expander("How do I cite SIEVE?"):
     st.markdown("""
     If you use SIEVE in your research, please cite:

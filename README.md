@@ -119,8 +119,9 @@ from sieve.pipeline import run_pipeline
 
 config = SIEVEConfig(
     language="Python",
-    start_date=date(2024, 1, 1),
-    end_date=date(2025, 1, 1),
+    start_date=date(2024, 1, 1),   # repo creation cutoff (contamination-free)
+    end_date=date(2025, 7, 1),     # repo creation upper bound
+    min_last_activity=date(2025, 7, 1),  # must have been pushed after this date
     min_stars=50,
     min_contributors=5,
     output_dir="./my_corpus",
@@ -138,8 +139,9 @@ print(summary)
 | Parameter | Type | Description |
 |---|---|---|
 | `language` | str | Target language: `Python`, `Java`, `JavaScript`, `C++` |
-| `start_date` | date | Only include repos pushed on or after this date |
-| `end_date` | date | Only include repos pushed on or before this date |
+| `start_date` | date | Only include repos **created** on or after this date — set to LLM training cutoff for contamination-free code |
+| `end_date` | date | Only include repos **created** on or before this date (default: first of last month) |
+| `min_last_activity` | date | Only include repos pushed on or after this date — ensures active repos (default: same as `end_date`) |
 | `min_stars` | int | Minimum GitHub stars |
 | `min_contributors` | int | Minimum unique contributors |
 | `max_repos` | int \| None | Cap on repos to process |

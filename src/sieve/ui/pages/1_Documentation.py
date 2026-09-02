@@ -46,10 +46,17 @@ st.subheader("Date Range")
 st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
-| **Start Date** | Only include repos with last commit on or after this date. Set this to just after a model's known training cutoff to avoid contamination. |
-| **End Date** | Only include repos with last commit on or before this date. Defaults to today. Together with Start Date, this defines the activity window. |
+| **Start Date** | Only include repos **created** on or after this date. Set this to the LLM training cutoff date — any repo created after this date is guaranteed contamination-free, since it did not exist when the model was trained. |
+| **End Date** | Only include repos **created** on or before this date. Default: first of last month. Filters out very new repos with little code. |
+| **Min Last Activity** | Only include repos pushed on or after this date. Must be ≥ End Date. Default: same as End Date. Ensures repos are actively maintained rather than abandoned after creation. |
 
-The GitHub search query uses `pushed:START..END`, filtering on the last push date of the default branch.
+The GitHub search query uses `created:START..END pushed:>=ACTIVITY`, filtering on
+**repository creation date** — not last push date. This is the correct approach for
+contamination-aware corpus building: a repo created after the cutoff cannot have
+existed in any LLM training dataset.
+
+**Guarantee:** If Start Date = Jan 1 2024, every extracted function and class is
+from code that was written after Jan 1 2024.
 """)
 
 st.subheader("Repository Filters")
