@@ -507,8 +507,9 @@ if st.session_state.summary:
                     else:
                         st.info(
                             "No dependency manifest found for this repository. "
-                            "SIEVE looks for `requirements.txt`, `package.json`, "
-                            "`pom.xml`, `conanfile.txt`, `vcpkg.json`, and `CMakeLists.txt`."
+                            "SIEVE looks for: `requirements*.txt`, `pyproject.toml`, `setup.cfg` (Python); "
+                            "`package.json` (JavaScript); `pom.xml` (Java); "
+                            "`conanfile.txt`, `vcpkg.json`, `CMakeLists.txt` (C++)."
                         )
 
     st.divider()

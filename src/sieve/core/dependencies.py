@@ -54,11 +54,11 @@ def _parse_pyproject_toml(path: Path) -> list[dict]:
 
         for dep in project.get("dependencies", []):
             dep_clean = re.sub(r"\[[^\]]*\]", "", dep).strip()
-            m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]+)?", dep_clean)
+            m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*a-zA-Z]+)?", dep_clean)
             if m:
                 deps.append({
                     "name":    m.group(1).strip(),
-                    "version": m.group(2).strip() or None,
+                    "version": m.group(2).strip() if m.group(2) else None,
                     "kind":    "main",
                 })
 
@@ -66,11 +66,11 @@ def _parse_pyproject_toml(path: Path) -> list[dict]:
         for group, group_deps in opt.items():
             for dep in group_deps:
                 dep_clean = re.sub(r"\[[^\]]*\]", "", dep).strip()
-                m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]+)?", dep_clean)
+                m = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*a-zA-Z]+)?", dep_clean)
                 if m:
                     deps.append({
                         "name":    m.group(1).strip(),
-                        "version": m.group(2).strip() or None,
+                        "version": m.group(2).strip() if m.group(2) else None,
                         "kind":    "optional",
                     })
 
