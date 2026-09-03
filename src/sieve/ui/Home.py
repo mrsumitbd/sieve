@@ -268,6 +268,7 @@ if run_button:
         # Clear previous run state before starting new run
         st.session_state.pipeline_log = []
         st.session_state.summary = None
+        st.session_state["_status_shown"] = True
         tmp_dir = tempfile.mkdtemp(prefix="sieve_")
         st.session_state.output_dir_path = tmp_dir
 
@@ -326,7 +327,7 @@ if run_button:
 
 # ─── Persistent Pipeline Log ─────────────────────────────────────────────────
 
-if st.session_state.pipeline_log:
+if st.session_state.pipeline_log and not st.session_state.get("_status_shown"):
     _summary = st.session_state.get("summary") or {}
     _pipeline_summary = _summary.get("pipeline_summary", "")
     _expander_label = f"✅ Pipeline complete! {_pipeline_summary}"
