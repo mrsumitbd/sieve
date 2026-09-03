@@ -265,6 +265,9 @@ if run_button:
     if not granularity:
         st.error("Both Max Functions and Max Classes are set to -1. At least one granularity must be enabled.")
     else:
+        # Clear previous run state before starting new run
+        st.session_state.pipeline_log = []
+        st.session_state.summary = None
         tmp_dir = tempfile.mkdtemp(prefix="sieve_")
         st.session_state.output_dir_path = tmp_dir
 
