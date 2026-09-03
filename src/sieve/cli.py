@@ -78,7 +78,7 @@ def run(
         try:
             from datetime import timedelta
             parsed_start    = date.fromisoformat(start_date)
-            _default_end    = (date.today().replace(day=1) - timedelta(days=1)).replace(day=1)
+            _default_end    = date.today() - timedelta(days=30)
             parsed_end      = date.fromisoformat(end_date) if end_date else _default_end
         except ValueError as e:
             console.print(f"[red]Invalid date format: {e}. Use YYYY-MM-DD.[/red]")

@@ -161,9 +161,9 @@ class TestRunCommand:
         assert "[1/3]" in result.output
 
     def test_run_end_date_defaults_when_omitted(self):
-        """When --end-date is omitted, first of last month should be used."""
+        """When --end-date is omitted, 30 days before today should be used."""
         from datetime import timedelta
-        _default_end = (date.today().replace(day=1) - timedelta(days=1)).replace(day=1)
+        _default_end = date.today() - timedelta(days=30)
         with patch("sieve.cli.run_pipeline", return_value=_FAKE_SUMMARY) as mock:
             result = runner.invoke(app, [
                 "run",

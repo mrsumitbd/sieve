@@ -39,8 +39,8 @@ class SIEVEConfig(BaseModel):
     min_stars: int = Field(default=10, ge=0, description="Minimum number of GitHub stars")
     min_contributors: int = Field(default=1, ge=1, description="Minimum number of unique contributors")
     max_repos: Optional[int] = Field(default=None, description="Cap on number of repos to process. None = no cap")
-    max_functions: Optional[int] = Field(default=None, ge=1, description="Cap on total functions after deduplication. None = no cap")
-    max_classes: Optional[int] = Field(default=None, ge=1, description="Cap on total classes after deduplication. None = no cap")
+    max_functions: Optional[int] = Field(default=None, ge=-1, description="Cap on total functions. None/0 = no cap, -1 = skip function extraction")
+    max_classes: Optional[int] = Field(default=None, ge=-1, description="Cap on total classes. None/0 = no cap, -1 = skip class extraction")
 
     # --- Content filters ---
     granularity: list[Granularity] = Field(

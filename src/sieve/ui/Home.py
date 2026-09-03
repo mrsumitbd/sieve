@@ -117,9 +117,8 @@ with st.sidebar:
         index=0,
     )
 
-    # Default end_date = one month before today
-    _default_end = date.today().replace(day=1) - __import__("datetime").timedelta(days=1)
-    _default_end = _default_end.replace(day=1)  # first of last month
+    # Default end_date = 30 days before today
+    _default_end = date.today() - __import__("datetime").timedelta(days=30)
 
     start_date = st.date_input(
         "Repo Creation Lower Bound",
@@ -149,21 +148,15 @@ with st.sidebar:
     min_contributors = st.number_input("Minimum Contributors", min_value=1, value=5,   step=1)
     max_repos        = st.number_input("Max Repos (0 = no cap)",      min_value=0, value=100, step=10)
     max_functions    = st.number_input(
-        "Max Functions (0 = no cap)", min_value=0, value=0, step=500,
-        help="Cap on total extracted functions after deduplication.",
+        "Max Functions (-1 = skip, 0 = no cap)", min_value=-1, value=0, step=500,
+        help="Cap on total extracted functions. Set to -1 to skip function extraction entirely.",
     )
     max_classes = st.number_input(
-        "Max Classes (0 = no cap)", min_value=0, value=0, step=100,
-        help="Cap on total extracted classes after deduplication.",
+        "Max Classes (-1 = skip, 0 = no cap)", min_value=-1, value=0, step=100,
+        help="Cap on total extracted classes. Set to -1 to skip class extraction entirely.",
     )
 
     st.subheader("Content Filters")
-    granularity = st.multiselect(
-        "Extraction Granularity",
-        options=["function", "class"],
-        default=["function", "class"],
-        help="Select the granularity of code snippets to extract.",
-    )
     engineered_only = st.toggle(
         "Engineered Projects Only", value=False,
         help=(
@@ -262,10 +255,16 @@ with st.sidebar:
 # ─── Pipeline Execution ───────────────────────────────────────────────────────
 
 if run_button:
+    # Derive granularity from max values: -1 means skip that granularity
+    granularity = []
+    if int(max_functions) != -1:
+        granularity.append("function")
+    if int(max_classes) != -1:
+        granularity.append("class")
+
     if not granularity:
-        st.error("Select at least one granularity level.")
+        st.error("Both Max Functions and Max Classes are set to -1. At least one granularity must be enabled.")
     else:
-        # Use a temp dir so output works both locally and on Streamlit Cloud
         tmp_dir = tempfile.mkdtemp(prefix="sieve_")
         st.session_state.output_dir_path = tmp_dir
 
@@ -282,9 +281,9 @@ if run_button:
                 end_date=end_date,
                 min_stars=int(min_stars),
                 min_contributors=int(min_contributors),
-                max_repos=int(max_repos)     if max_repos     > 0 else None,
+                max_repos=int(max_repos)         if max_repos     > 0 else None,
                 max_functions=int(max_functions) if max_functions > 0 else None,
-                max_classes=int(max_classes)   if max_classes   > 0 else None,
+                max_classes=int(max_classes)     if max_classes   > 0 else None,
                 granularity=granularity,
                 engineered_only=engineered_only,
                 annotate_llm_score=annotate_llm_score,
@@ -772,9 +771,9 @@ with st.expander("📋 Current Configuration (JSON)"):
             "min_stars":        int(min_stars),
             "min_contributors": int(min_contributors),
             "max_repos":        int(max_repos)      if max_repos      > 0 else None,
-            "max_functions":    int(max_functions)   if max_functions   > 0 else None,
-            "max_classes":      int(max_classes)     if max_classes     > 0 else None,
-            "granularity":      granularity,
+            "max_functions":    int(max_functions) if max_functions > 0 else None,
+            "max_classes":      int(max_classes)   if max_classes   > 0 else None,
+            "granularity":      [g for g, v in [("function", max_functions), ("class", max_classes)] if int(v) != -1],
             "engineered_only":  engineered_only,
             "annotate_llm_score": annotate_llm_score,
             "deduplicate":      deduplicate_flag,
