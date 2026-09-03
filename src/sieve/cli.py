@@ -47,9 +47,8 @@ def run(
         None, "--config", "-c", help="Path to a JSON config file"
     ),
     language: Optional[str] = typer.Option(None, help="Programming language"),
-    start_date: Optional[str] = typer.Option(None, help="Start date — repos created on or after (YYYY-MM-DD). Set to LLM training cutoff for contamination-free data."),
-    end_date: Optional[str] = typer.Option(None, help="End date — repos created on or before (YYYY-MM-DD). Defaults to one month before today."),
-    min_last_activity: Optional[str] = typer.Option(None, help="Only include repos pushed on or after this date (YYYY-MM-DD). Defaults to end_date."),
+    start_date: Optional[str] = typer.Option(None, help="Repo creation lower bound (YYYY-MM-DD). Set to LLM release date for contamination-free data."),
+    end_date: Optional[str] = typer.Option(None, help="Repo creation upper bound (YYYY-MM-DD). Defaults to one month before today."),
     min_stars: int = typer.Option(10, help="Minimum stars"),
     min_contributors: int = typer.Option(1, help="Minimum contributors"),
     max_repos: Optional[int] = typer.Option(None, help="Max repos to process (default: no cap)"),
@@ -81,7 +80,6 @@ def run(
             parsed_start    = date.fromisoformat(start_date)
             _default_end    = (date.today().replace(day=1) - timedelta(days=1)).replace(day=1)
             parsed_end      = date.fromisoformat(end_date) if end_date else _default_end
-            parsed_activity = date.fromisoformat(min_last_activity) if min_last_activity else None
         except ValueError as e:
             console.print(f"[red]Invalid date format: {e}. Use YYYY-MM-DD.[/red]")
             raise typer.Exit(1)
@@ -90,7 +88,6 @@ def run(
             language=language,
             start_date=parsed_start,
             end_date=parsed_end,
-            min_last_activity=parsed_activity,
             min_stars=min_stars,
             min_contributors=min_contributors,
             max_repos=max_repos,

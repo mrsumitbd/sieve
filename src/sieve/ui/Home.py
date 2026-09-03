@@ -122,37 +122,27 @@ with st.sidebar:
     _default_end = _default_end.replace(day=1)  # first of last month
 
     start_date = st.date_input(
-        "Start Date",
+        "Repo Creation Lower Bound",
         value=date(2024, 1, 1),
         help=(
-            "Repo **creation** date lower bound. Only repos created on or after "
-            "this date are included. Set this to the LLM training cutoff date to "
-            "guarantee contamination-free code."
+            "Only repos created on or after this date are included. "
+            "For contamination-free evaluation, set this to the **release date** "
+            "of the LLM(s) you are studying — data used for both pre-training "
+            "and fine-tuning predates the release, so any repo created after "
+            "the release date is guaranteed unseen by the model."
         ),
     )
     end_date = st.date_input(
-        "End Date",
+        "Repo Creation Upper Bound",
         value=_default_end,
         help=(
-            "Repo **creation** date upper bound. Only repos created on or before "
-            "this date are included. Default: one month before today, to avoid "
-            "very new repos with little code."
+            "Only repos created on or before this date are included. "
+            "Default: one month before today, allowing time for initial "
+            "commits and activity to accumulate in recently created repos."
         ),
     )
     if end_date < start_date:
-        st.error("End Date must be on or after Start Date.")
-
-    min_last_activity = st.date_input(
-        "Min Last Activity",
-        value=date.today(),
-        help=(
-            "Only include repos that have been pushed to on or after this date. "
-            "Ensures repos are actively maintained. Must be on or after End Date. "
-            "Default: today (no lower bound on activity)."
-        ),
-    )
-    if min_last_activity < end_date:
-        st.error("Min Last Activity cannot be before End Date.")
+        st.error("Repo Creation Upper Bound must be on or after Repo Creation Lower Bound.")
 
     st.subheader("Repository Filters")
     min_stars        = st.number_input("Minimum Stars",        min_value=0, value=50,  step=10)
@@ -170,8 +160,9 @@ with st.sidebar:
     st.subheader("Content Filters")
     granularity = st.multiselect(
         "Extraction Granularity",
-        options=[g.value for g in Granularity],
+        options=["function", "class"],
         default=["function", "class"],
+        help="Select the granularity of code snippets to extract.",
     )
     engineered_only = st.toggle(
         "Engineered Projects Only", value=False,
@@ -197,17 +188,20 @@ with st.sidebar:
         ),
     )
     export_ast = st.toggle(
-        "Export AST", value=False,
+        "Export AST-Derived Features", value=False,
         help=(
-            "Include AST-derived features (depth, node count, node type distribution) "
-            "in every exported record. Enable 'Full AST JSON' to also include the "
-            "complete parse tree — significantly increases file size."
+            "Include AST-derived structural features — parse tree depth, "
+            "node count, and node type distribution — in every exported record."
         ),
     )
     export_full_ast = st.toggle(
-        "Full AST JSON (opt-in)", value=False,
+        "Include Full AST in Export", value=False,
         disabled=not export_ast,
-        help="Include the complete AST as nested JSON in each record. Only available when Export AST is enabled.",
+        help=(
+            "Include the complete parse tree as nested JSON in each record. "
+            "Only available when 'Export AST-Derived Features' is enabled. "
+            "Significantly increases file size — use with small corpora."
+        ),
     ) if export_ast else False
 
     st.subheader("Processing")
@@ -222,7 +216,9 @@ with st.sidebar:
     export_format = st.selectbox(
         "Export Format",
         options=[f.value for f in ExportFormat],
+        format_func=lambda x: {"jsonl": "JSONL", "parquet": "Parquet", "both": "Both (JSONL + Parquet)"}[x],
         index=0,
+        help="JSONL is human-readable and line-oriented. Parquet is columnar and efficient for large-scale analysis.",
     )
 
     st.subheader("API Tokens")
@@ -284,7 +280,6 @@ if run_button:
                 language=language,
                 start_date=start_date,
                 end_date=end_date,
-                min_last_activity=min_last_activity,
                 min_stars=int(min_stars),
                 min_contributors=int(min_contributors),
                 max_repos=int(max_repos)     if max_repos     > 0 else None,
@@ -774,7 +769,6 @@ with st.expander("📋 Current Configuration (JSON)"):
             "language":         language,
             "start_date":           str(start_date),
             "end_date":             str(end_date),
-            "min_last_activity":    str(min_last_activity),
             "min_stars":        int(min_stars),
             "min_contributors": int(min_contributors),
             "max_repos":        int(max_repos)      if max_repos      > 0 else None,

@@ -232,7 +232,6 @@ def run_pipeline(
         min_contributors=config.min_contributors,
         max_repos=config.max_repos,
         github_token=config.github_token,
-        min_last_activity=config.min_last_activity,
     ):
         all_discovered.append(repo_meta)
         now = _time.time()

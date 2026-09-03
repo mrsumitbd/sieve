@@ -64,26 +64,49 @@ with st.expander("How does SIEVE guarantee contamination-free data?"):
 
 with st.expander("What training cutoff dates should I use?"):
     st.markdown("""
-    Use the published or estimated training cutoff of the model(s) you are studying:
+    **Use the model's public release date, not its knowledge cutoff date.**
 
-    | Model | Approximate Training Cutoff |
+    These two dates are often confused but are different:
+
+    - **Knowledge cutoff** — the last date of data used for *pre-training*. For
+      example, GPT-4's knowledge cutoff is April 2023.
+    - **Release date** — when the model became publicly available. GPT-4 was
+      released in March 2023.
+
+    **Why the release date is safer:** Between the knowledge cutoff and the
+    release date, models are typically fine-tuned on additional data —
+    instruction-following examples, RLHF preference data, and sometimes
+    supervised fine-tuning on code. This fine-tuning data postdates the
+    pre-training cutoff but predates the release. By setting
+    **Repo Creation Lower Bound** to the release date, you guarantee that
+    the code you collect post-dates both the pre-training and fine-tuning
+    phases of the model.
+
+    Using the knowledge cutoff instead of the release date leaves a window
+    (sometimes weeks, sometimes months) where fine-tuning data could
+    contaminate your evaluation set.
+
+    Reference release dates for common models:
+
+    | Model | Release Date |
     |---|---|
-    | GPT-3.5 (ChatGPT) | September 2021 |
-    | GPT-4 | April 2023 |
-    | GPT-4o | October 2023 |
-    | Claude 3 (Haiku/Sonnet/Opus) | August 2023 |
-    | Claude 3.5 Sonnet | April 2024 |
-    | Gemini 1.5 Pro | November 2023 |
-    | Llama 3 (8B/70B) | December 2023 |
-    | CodeLlama | January 2023 |
+    | GPT-3.5 (ChatGPT) | November 2022 |
+    | GPT-4 | March 2023 |
+    | GPT-4o | May 2024 |
+    | Claude 3 (Haiku/Sonnet/Opus) | March 2024 |
+    | Claude 3.5 Sonnet | June 2024 |
+    | Gemini 1.5 Pro | February 2024 |
+    | Llama 3 (8B/70B) | April 2024 |
+    | CodeLlama | August 2023 |
 
-    If evaluating multiple models, use the **latest** cutoff among them to
-    guarantee contamination-free data for all models simultaneously.
+    If evaluating multiple models simultaneously, use the **latest** release
+    date among them to guarantee contamination-free data for all.
 
     When submitting papers, you can state:
     > *"Our evaluation corpus was built using SIEVE, collecting only from
-    > repositories created after [DATE]. By construction, no extracted code
-    > could have appeared in the pre-training data of any evaluated model."*
+    > repositories created after [DATE] (the release date of [Model]).
+    > By construction, no extracted code could have appeared in the
+    > pre-training or fine-tuning data of any evaluated model."*
     """)
     st.markdown("""
     **SIEVE** (Software Ingestion & Extraction for Verifiable Evaluation) is a

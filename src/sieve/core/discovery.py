@@ -49,17 +49,13 @@ def _build_query(
     start_date: date,
     end_date: date,
     min_stars: int,
-    min_last_activity: Optional[date] = None,
 ) -> str:
     start = start_date.strftime("%Y-%m-%d")
     end   = end_date.strftime("%Y-%m-%d")
     lang  = LANGUAGE_QUERY_MAP.get(language, language.lower())
-    # Use created: for the date range — guarantees contamination-free code
-    activity = (min_last_activity or end_date).strftime("%Y-%m-%d")
     return (
         f"language:{lang} "
         f"created:{start}..{end} "
-        f"pushed:>={activity} "
         f"stars:>={min_stars} "
         f"fork:false "
         f"archived:false"
@@ -87,24 +83,19 @@ def discover_repos(
     min_contributors: int = 1,
     max_repos: Optional[int] = None,
     github_token: Optional[str] = None,
-    min_last_activity: Optional[date] = None,
 ) -> Iterator[RepoMetadata]:
     """
     Generator that yields RepoMetadata for repos matching all filters.
-    Excludes forks and archived repos at query level (not just post-filter).
 
     Args:
-        language:          Programming language (e.g. "Python")
-        start_date:        Only include repos created on or after this date
-                           (contamination cutoff — any code in these repos is
-                           guaranteed to post-date LLM training data)
-        end_date:          Only include repos created on or before this date
-        min_stars:         Minimum star count
-        min_contributors:  Minimum unique contributor count
-        max_repos:         If set, stop after yielding this many repos
-        github_token:      GitHub PAT. Without it, rate limit is 10 req/min.
-        min_last_activity: Only include repos pushed on or after this date.
-                           Defaults to end_date if not specified.
+        language:         Programming language (e.g. "Python")
+        start_date:       Only include repos created on or after this date.
+                          Set to the LLM release date for contamination-free data.
+        end_date:         Only include repos created on or before this date.
+        min_stars:        Minimum star count
+        min_contributors: Minimum unique contributor count
+        max_repos:        If set, stop after yielding this many repos
+        github_token:     GitHub PAT. Without it, rate limit is 10 req/min.
 
     Yields:
         RepoMetadata for each qualifying repo
@@ -112,7 +103,7 @@ def discover_repos(
     from datetime import datetime, timezone
 
     g = Github(github_token, per_page=GITHUB_SEARCH_PAGE_SIZE) if github_token else Github(per_page=GITHUB_SEARCH_PAGE_SIZE)
-    query = _build_query(language, start_date, end_date, min_stars, min_last_activity)
+    query = _build_query(language, start_date, end_date, min_stars)
 
     logger.info(f"GitHub search query: {query}")
 
