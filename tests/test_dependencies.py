@@ -10,6 +10,8 @@ from pathlib import Path
 from sieve.core.dependencies import (
     parse_dependencies,
     _parse_requirements_txt,
+    _parse_pyproject_toml,
+    _parse_pyproject_toml_regex,
     _parse_python_deps,
     _parse_js_deps,
     _parse_java_deps,
@@ -62,7 +64,174 @@ class TestParseRequirementsTxt:
         assert _parse_requirements_txt(p) == []
 
 
-class TestParsePythonDeps:
+class TestParsePyprojectToml:
+    """Covers PEP 621 `[project]`, Poetry, and the regex-fallback path --
+    previously entirely untested (0 of ~61 lines)."""
+
+    def test_pep621_dependencies_parsed(self, tmp_path):
+        content = """
+[project]
+name = "myapp"
+dependencies = [
+    "requests>=2.28",
+    "numpy",
+]
+"""
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        names = [d["name"] for d in deps]
+        assert "requests" in names and "numpy" in names
+
+    def test_pep621_dependency_kind_is_main(self, tmp_path):
+        content = '[project]\ndependencies = ["requests"]\n'
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        assert all(d["kind"] == "main" for d in deps)
+
+    def test_pep621_version_captured(self, tmp_path):
+        content = '[project]\ndependencies = ["flask>=2.0.0"]\n'
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        d = next(d for d in deps if d["name"] == "flask")
+        assert d["version"] is not None and "2.0.0" in d["version"]
+
+    def test_pep621_extras_stripped_from_name(self, tmp_path):
+        content = '[project]\ndependencies = ["requests[security]>=2.0"]\n'
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        names = [d["name"] for d in deps]
+        assert "requests" in names
+        assert not any("[" in n for n in names)
+
+    def test_pep621_optional_dependencies_kind(self, tmp_path):
+        content = """
+[project]
+dependencies = ["requests"]
+
+[project.optional-dependencies]
+dev = ["pytest", "black"]
+"""
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        opt = {d["name"]: d["kind"] for d in deps if d["name"] in ("pytest", "black")}
+        assert opt == {"pytest": "optional", "black": "optional"}
+
+    def test_pep621_multiple_optional_groups_all_captured(self, tmp_path):
+        content = """
+[project.optional-dependencies]
+dev = ["pytest"]
+docs = ["sphinx"]
+"""
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        names = [d["name"] for d in deps]
+        assert "pytest" in names and "sphinx" in names
+
+    def test_poetry_string_version_captured(self, tmp_path):
+        content = """
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.28.0"
+"""
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        d = next(d for d in deps if d["name"] == "requests")
+        assert d["version"] == "^2.28.0" and d["kind"] == "main"
+
+    def test_poetry_python_key_skipped(self, tmp_path):
+        content = """
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.28.0"
+"""
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        assert "python" not in [d["name"] for d in deps]
+
+    def test_poetry_dict_form_version_captured(self, tmp_path):
+        content = """
+[tool.poetry.dependencies]
+numpy = { version = "^1.24", optional = true }
+"""
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        d = next(d for d in deps if d["name"] == "numpy")
+        assert d["version"] == "^1.24"
+
+    def test_poetry_dict_form_without_version_is_none(self, tmp_path):
+        content = """
+[tool.poetry.dependencies]
+mylocalpkg = { path = "../mylocalpkg" }
+"""
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        d = next(d for d in deps if d["name"] == "mylocalpkg")
+        assert d["version"] is None
+
+    def test_poetry_dev_dependencies_kind(self, tmp_path):
+        content = """
+[tool.poetry.dev-dependencies]
+pytest = "^8.0"
+"""
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        d = next(d for d in deps if d["name"] == "pytest")
+        assert d["kind"] == "dev"
+
+    def test_empty_pyproject_returns_empty(self, tmp_path):
+        p = _write(tmp_path, "pyproject.toml", "[project]\nname = \"myapp\"\n")
+        assert _parse_pyproject_toml(p) == []
+
+    def test_malformed_toml_falls_back_to_regex(self, tmp_path):
+        # Missing closing bracket on the table header makes this invalid TOML,
+        # forcing tomllib.loads() to raise and _parse_pyproject_toml() to hit
+        # its `except Exception: return _parse_pyproject_toml_regex(path)`.
+        content = '[project\ndependencies = ["requests>=2.0", "flask"]\n'
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml(p)
+        names = [d["name"] for d in deps]
+        assert "requests" in names and "flask" in names
+
+    def test_regex_fallback_called_directly(self, tmp_path):
+        content = 'dependencies = ["click>=8.0", "rich"]\n'
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml_regex(p)
+        names = [d["name"] for d in deps]
+        assert "click" in names and "rich" in names
+
+    def test_regex_fallback_no_dependencies_block_returns_empty(self, tmp_path):
+        p = _write(tmp_path, "pyproject.toml", "[project]\nname = \"myapp\"\n")
+        assert _parse_pyproject_toml_regex(p) == []
+
+    def test_regex_fallback_strips_extras(self, tmp_path):
+        content = 'dependencies = ["requests[security]>=2.0"]\n'
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml_regex(p)
+        names = [d["name"] for d in deps]
+        assert "requests" in names
+        assert not any("[" in n for n in names)
+
+    def test_regex_fallback_extras_do_not_truncate_later_entries(self, tmp_path):
+        # Regression test: a naive "stop at the first ']'" regex would treat
+        # the ']' closing "[security]" as the end of the whole list, silently
+        # dropping every entry that comes after it.
+        content = 'dependencies = ["requests[security]>=2.0", "flask", "numpy"]\n'
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml_regex(p)
+        names = [d["name"] for d in deps]
+        assert names == ["requests", "flask", "numpy"]
+
+    def test_regex_fallback_unpinned_dependency_does_not_crash(self, tmp_path):
+        # Regression test: version-group can legitimately be absent (no
+        # version pin at all); this must not raise AttributeError.
+        content = 'dependencies = ["rich"]\n'
+        p = _write(tmp_path, "pyproject.toml", content)
+        deps = _parse_pyproject_toml_regex(p)
+        d = next(d for d in deps if d["name"] == "rich")
+        assert d["version"] is None
+
+
+
     def test_requirements_txt_found(self, tmp_path):
         _write(tmp_path, "requirements.txt", "requests\nnumpy\n")
         deps = _parse_python_deps(tmp_path)
@@ -88,6 +257,18 @@ class TestParsePythonDeps:
         deps = _parse_python_deps(tmp_path)
         names = [d["name"] for d in deps]
         assert "requests" in names and "numpy" in names
+
+    def test_pyproject_toml_found(self, tmp_path):
+        _write(tmp_path, "pyproject.toml", '[project]\ndependencies = ["requests"]\n')
+        deps = _parse_python_deps(tmp_path)
+        assert "requests" in [d["name"] for d in deps]
+
+    def test_pyproject_toml_combined_with_requirements_txt(self, tmp_path):
+        _write(tmp_path, "requirements.txt", "numpy\n")
+        _write(tmp_path, "pyproject.toml", '[project]\ndependencies = ["requests"]\n')
+        deps = _parse_python_deps(tmp_path)
+        names = [d["name"] for d in deps]
+        assert "numpy" in names and "requests" in names
 
 
 class TestParseJsDeps:

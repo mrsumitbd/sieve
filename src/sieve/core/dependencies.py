@@ -95,19 +95,56 @@ def _parse_pyproject_toml(path: Path) -> list[dict]:
     return deps
 
 
+def _extract_bracketed_value(text: str, key: str) -> Optional[str]:
+    """
+    Find `key = [...]` in text and return the inner content between the
+    matching brackets, correctly handling `[`/`]` characters that appear
+    inside quoted strings (e.g. PEP 508 extras like "requests[security]").
+    A naive `\\[([^\\]]*)\\]` regex breaks on these: it stops at the first
+    `]` it sees, which for `["requests[security]>=2.0"]` is the one closing
+    `[security]`, not the actual end of the list -- silently truncating and
+    corrupting every subsequent entry.
+    """
+    m = re.search(rf'{key}\s*=\s*\[', text)
+    if not m:
+        return None
+    start = m.end()
+    depth = 1
+    in_string = False
+    i = start
+    while i < len(text) and depth > 0:
+        ch = text[i]
+        if in_string:
+            if ch == "\\":
+                i += 1  # skip escaped character, e.g. \"
+            elif ch == '"':
+                in_string = False
+        else:
+            if ch == '"':
+                in_string = True
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+        i += 1
+    if depth != 0:
+        return None  # unbalanced brackets; give up rather than guess
+    return text[start:i - 1]
+
+
 def _parse_pyproject_toml_regex(path: Path) -> list[dict]:
     """Regex fallback for pyproject.toml."""
     deps = []
     text = path.read_text(encoding="utf-8", errors="replace")
-    m = re.search(r'dependencies\s*=\s*\[([^\]]*)\]', text, re.DOTALL)
-    if m:
-        for item in re.findall(r'"([^"]+)"', m.group(1)):
+    inner = _extract_bracketed_value(text, "dependencies")
+    if inner is not None:
+        for item in re.findall(r'"([^"]+)"', inner):
             item_clean = re.sub(r"\[[^\]]*\]", "", item).strip()
             pm = re.match(r"^([A-Za-z0-9_\-\.]+)\s*([><=!~^,\s\d\.\*]+)?", item_clean)
             if pm:
                 deps.append({
                     "name":    pm.group(1).strip(),
-                    "version": pm.group(2).strip() or None,
+                    "version": pm.group(2).strip() if pm.group(2) else None,
                     "kind":    "main",
                 })
     return deps

@@ -265,6 +265,30 @@ def _clean_indentation(snippet: str) -> str:
 
 # ─── Python Extraction ───────────────────────────────────────────────────────
 
+def _strip_python_string_literal(raw: str) -> str:
+    """
+    Strip a Python string literal's prefix (any combination of r/R/b/B/f/F/u/U,
+    e.g. r, rb, Rb, f) and its quote characters (triple or single), regardless
+    of quote style. Plain str.strip(...) with a quote-character set only
+    strips quote characters from each end, so it silently leaves a leading
+    prefix letter (e.g. 'r') and its adjacent quotes untouched for
+    raw/byte/f-strings -- this is a replacement for that broken pattern.
+    """
+    raw = raw.strip()
+    prefix_len = 0
+    while prefix_len < len(raw) and raw[prefix_len].isalpha():
+        prefix_len += 1
+    prefix, body = raw[:prefix_len], raw[prefix_len:]
+    # Guard: only recognized Python string-prefix letters; otherwise this
+    # wasn't actually a prefixed literal and we should not strip anything.
+    if prefix and not set(prefix.lower()) <= set("rbfu"):
+        return raw
+    for quote in ('"""', "'''", '"', "'"):
+        if body.startswith(quote) and body.endswith(quote) and len(body) >= 2 * len(quote):
+            return body[len(quote):-len(quote)]
+    return body
+
+
 def _extract_python_docstring(node, source_bytes: bytes) -> Optional[str]:
     """Extract docstring from the first statement of a function/class body."""
     for child in node.children:
@@ -274,7 +298,7 @@ def _extract_python_docstring(node, source_bytes: bytes) -> Optional[str]:
                     for sub in stmt.children:
                         if sub.type == "string":
                             raw = _node_text(sub, source_bytes)
-                            return raw.strip('"""').strip("'''").strip('"').strip("'").strip()
+                            return _strip_python_string_literal(raw).strip()
             break
     return None
 
@@ -438,6 +462,35 @@ def _collect_python_imports(root, source_bytes: bytes) -> list[tuple[str, list[s
     return results
 
 
+_COMMENT_STRING_RE = re.compile(
+    r'"""[\s\S]*?"""'      # Python triple double-quoted string/docstring
+    r"|'''[\s\S]*?'''"     # Python triple single-quoted string/docstring
+    r'|"(?:[^"\\]|\\.)*"'  # double-quoted string literal (any of the 4 languages)
+    r"|'(?:[^'\\]|\\.)*'"  # single-quoted string / char literal
+    r'|//[^\n]*'           # line comment (Java/JS/C++)
+    r'|/\*[\s\S]*?\*/'     # block comment (Java/JS/C++)
+    r'|#[^\n]*'            # line comment (Python)
+)
+
+
+def _strip_comments_and_string_literals(text: str) -> str:
+    """
+    Best-effort removal of comments and string/char literal contents across
+    the languages SIEVE supports, so import/include-usage matching does not
+    fire on identifier-like text that only happens to appear inside a
+    docstring, comment, or string literal (e.g. the word "re" inside a
+    docstring falsely counted as a use of `import re`).
+
+    This is a lightweight regex pass, not a real tokenizer, so it can still
+    be fooled by unusual cases (e.g. a real reference embedded inside an
+    f-string expression, such as f"{re.escape(x)}", is stripped along with
+    the rest of the string and would no longer count as a use). It trades a
+    narrow false-negative risk for removing the much more common
+    false-positive pattern documented in validation.
+    """
+    return _COMMENT_STRING_RE.sub(" ", text)
+
+
 def _filter_used_imports(
     imports: list[tuple[str, list[str]]],
     source_code: str,
@@ -445,16 +498,20 @@ def _filter_used_imports(
     """
     Return import statement strings whose introduced names appear as whole
     tokens in source_code.  Uses word-boundary regex to avoid false positives
-    (e.g. 'os' matching inside 'cosmos').
+    (e.g. 'os' matching inside 'cosmos'). Comments and string/docstring
+    contents are stripped first, and a name preceded by '.' (i.e. used as an
+    attribute/method access on some other object, like `mydict.copy()`) does
+    not count as a use of an import of the same name.
     Wildcard imports (from x import *) are always included.
     """
     used = []
+    code_only = _strip_comments_and_string_literals(source_code)
     for stmt_text, names in imports:
         if "*" in names:
             used.append(stmt_text)
             continue
         for name in names:
-            if re.search(rf"\b{re.escape(name)}\b", source_code):
+            if re.search(rf"(?<!\.)\b{re.escape(name)}\b", code_only):
                 used.append(stmt_text)
                 break
     return used
@@ -472,11 +529,19 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
     functions: list[FunctionRecord] = []
     classes: list[ClassRecord] = []
 
-    def walk(node, parent_class: Optional[str] = None, decorators: list[str] = None, _depth: int = 0):
+    def walk(node, parent_class: Optional[str] = None, decorators: list[str] = None, _depth: int = 0,
+             source_node=None):
         if _depth > 200:
             return
         if decorators is None:
             decorators = []
+        # source_node is the node whose text span should become `source_code`.
+        # It differs from `node` only when `node` is the inner definition of a
+        # decorated_definition — in that case source_node is the outer
+        # decorated_definition, so the decorator line(s) are not silently
+        # dropped from the extracted source. Defaults to `node` itself.
+        if source_node is None:
+            source_node = node
 
         if node.type == "decorated_definition":
             # Collect all decorator texts, then recurse into the inner definition
@@ -491,7 +556,8 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
                 None,
             )
             if inner:
-                walk(inner, parent_class=parent_class, decorators=dec_texts, _depth=_depth + 1)
+                walk(inner, parent_class=parent_class, decorators=dec_texts, _depth=_depth + 1,
+                     source_node=node)
             return
 
         if node.type in ("function_definition", "async_function_definition"):
@@ -509,7 +575,7 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
             ret_annotation = _node_text(ret_node, source_bytes) if ret_node else None
 
             docstring = _extract_python_docstring(node, source_bytes)
-            source_code = _clean_indentation(_node_text(node, source_bytes))
+            source_code = _clean_indentation(_node_text(source_node, source_bytes))
             signature = _build_python_function_signature(node, source_bytes)
             used_imports = _filter_used_imports(file_imports, source_code)
 
@@ -546,7 +612,7 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
                         parent_classes.append(_node_text(b, source_bytes))
 
             docstring = _extract_python_docstring(node, source_bytes)
-            source_code = _clean_indentation(_node_text(node, source_bytes))
+            source_code = _clean_indentation(_node_text(source_node, source_bytes))
             skeleton = _build_python_skeleton(node, source_bytes)
             used_imports = _filter_used_imports(file_imports, source_code)
 
@@ -569,6 +635,12 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
                                 method_names.append(mname)
                                 if mname == "__init__":
                                     has_constructor = True
+
+            # @dataclass (and variants like @dataclasses.dataclass, or with
+            # arguments e.g. @dataclass(frozen=True)) synthesizes __init__ at
+            # runtime even when no explicit constructor is written in the body.
+            if not has_constructor:
+                has_constructor = any("dataclass" in d.lower() for d in decorators)
 
             classes.append(ClassRecord(
                 repo=repo,

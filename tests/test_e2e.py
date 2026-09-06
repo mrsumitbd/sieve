@@ -474,9 +474,13 @@ class TestLLMScoreAnnotation:
         assert "total_functions" in summary
 
 
-# ─── Pass 3 shortfall redistribution ─────────────────────────────────────────
+# ─── Phase 4b: final safety-net cap (NOT Pass 3 — separate mechanism) ────────
+# This lived under `TestPass3Shortfall` before, mislabeled: its own docstring
+# names "Phase 4b safety-net caps" (pipeline.py lines 538-552), a final
+# _stratified_sample() truncation that runs *after* Pass 3, independent of
+# it. Moved here under its own name so it isn't mistaken for Pass 3 coverage.
 
-class TestPass3Shortfall:
+class TestFinalCapEnforcement:
     def test_final_cap_applied_when_overshoot(self, tmp_path, synthetic_repo):
         """Phase 4b safety-net caps fire when per-repo extraction slightly overshoots."""
         config = SIEVEConfig(
@@ -492,13 +496,30 @@ class TestPass3Shortfall:
         assert summary["total_functions"] <= 1
         assert summary["total_classes"] <= 1
 
-    def test_shortfall_filled_from_other_repos(self, tmp_path, synthetic_repo, tmp_repo):
-        """
-        When one repo returns fewer records than allocated, Pass 3 fills the gap
-        from repos with remaining capacity.
-        """
-        import shutil
 
+# ─── Pass 3 shortfall redistribution ─────────────────────────────────────────
+#
+# Shortfall (pipeline.py line 409: `if func_shortfall > 0 or class_shortfall > 0`)
+# only occurs when a repo's *actual* Pass 2 yield falls short of its own
+# stratified allocation from Pass 1. Since every repo's allocation is derived
+# from its own Pass-1 count, simply giving repos "generous supply" (as in the
+# test below) means every repo satisfies its own quota and the sum already
+# equals the target after Pass 1+2 alone -- Pass 3 never runs. Genuinely
+# forcing a shortfall requires a repo whose real per-repo yield diverges from
+# what Pass 1 counted for it (e.g. a repo that fails during Pass 2's clone
+# after being successfully counted in Pass 1, or one that legitimately
+# returns less content on a second read) -- that's what the two new tests
+# below construct.
+
+class TestPass3Shortfall:
+    def test_two_repo_allocation_meets_cap_without_pass3(self, tmp_path, synthetic_repo, tmp_repo):
+        """
+        Sanity check only: with generous, consistent per-repo supply, the
+        stratified Pass 1+2 allocation already sums to the target and Pass 3
+        never has to run. (Renamed from `test_shortfall_filled_from_other_repos`
+        -- its old name/docstring implied Pass 3 engagement that does not
+        actually occur in this scenario; see the two tests below for that.)
+        """
         repo2 = tmp_repo({
             "src/b.py": "\n".join(
                 [f"def func_{i}(): return {i}" for i in range(20)]
@@ -529,3 +550,117 @@ class TestPass3Shortfall:
             summary = run_pipeline(config)
 
         assert summary["total_functions"] <= 5
+
+    def test_step3a_surplus_cache_fills_shortfall_after_clone_failure(
+        self, tmp_path, synthetic_repo, tmp_repo,
+    ):
+        """
+        repo1 is successfully cloned and counted in Pass 1 (so it receives a
+        real stratified allocation) but its Pass-2 clone attempt fails --
+        contributing 0 despite Pass 1 having counted real content for it.
+        This creates a genuine shortfall. repo2 has generous surplus beyond
+        its own allocation, cached in Pass 2. Pass 3 Step 3a should pull the
+        shortfall from that cache without any re-clone.
+        """
+        repo2 = tmp_repo({
+            "src/b.py": "\n".join(
+                [f"def func_{i}(): return {i}" for i in range(20)]
+            ) + "\n",
+        })
+
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=5,
+            max_classes=None,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+
+        meta1 = _make_repo_meta("owner/repo1")
+        meta2 = _make_repo_meta("owner/repo2")
+
+        clone_calls = {"repo1": 0}
+
+        def fake_clone(repo_full_name, target_dir):
+            if "repo1" in repo_full_name:
+                clone_calls["repo1"] += 1
+                if clone_calls["repo1"] == 1:
+                    # Pass 1's counting clone succeeds (repo1 gets allocated
+                    # a real, nonzero share of the cap based on this).
+                    shutil.copytree(str(synthetic_repo), target_dir, dirs_exist_ok=True)
+                    return True
+                # Pass 2's extraction clone fails -- e.g. a transient error.
+                return False
+            shutil.copytree(str(repo2), target_dir, dirs_exist_ok=True)
+            return True
+
+        with patch("sieve.pipeline.discover_repos",
+                   return_value=iter([meta1, meta2])), \
+             patch("sieve.pipeline._clone_repo", side_effect=fake_clone):
+            summary = run_pipeline(config)
+
+        # repo1 contributed nothing (Pass 2 clone failed) but the cap was
+        # still hit exactly -- proof the shortfall was filled from repo2's
+        # cached surplus (Step 3a), not from repo1.
+        assert summary["total_functions"] == 5
+        assert "owner/repo1" in summary["failed_repos"]
+
+    def test_step3b_reclone_recovers_remaining_capacity_when_cache_insufficient(
+        self, tmp_path,
+    ):
+        """
+        Single repo. Its Pass-1 counting clone sees 8 real functions (so it
+        is allocated a cap of 6), but its Pass-2 extraction clone only
+        exposes the first 2 of those 8 (e.g. a partial/incomplete checkout)
+        -- leaving no surplus cached and a shortfall of 4. Step 3a's surplus
+        cache is empty, so Step 3b must re-clone with a higher cap; this
+        third clone exposes the full 8, letting extraction recover the
+        remaining 4 genuinely new functions.
+        """
+        small_dir = tmp_path / "repo1_small"
+        big_dir   = tmp_path / "repo1_big"
+        small_dir.mkdir()
+        big_dir.mkdir()
+
+        # `big` is `small`'s two functions plus 6 more appended after --
+        # same file_path and start_line for the first two, so the pipeline's
+        # existing-key dedup correctly recognizes them as already-seen and
+        # only counts the trailing 6 as new.
+        small_code = "\n".join(f"def func_{i}(): return {i}" for i in range(2)) + "\n"
+        big_code   = "\n".join(f"def func_{i}(): return {i}" for i in range(8)) + "\n"
+        (small_dir / "main.py").write_text(small_code)
+        (big_dir   / "main.py").write_text(big_code)
+
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=6,
+            max_classes=None,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+
+        meta1 = _make_repo_meta("owner/repo1")
+
+        clone_calls = {"n": 0}
+
+        def fake_clone(repo_full_name, target_dir):
+            clone_calls["n"] += 1
+            # Call 1: Pass 1 counting -> full 8-function version.
+            # Call 2: Pass 2 extraction -> only the 2-function version.
+            # Call 3+: Pass 3 Step 3b re-clone -> full 8-function version again.
+            src = str(small_dir) if clone_calls["n"] == 2 else str(big_dir)
+            shutil.copytree(src, target_dir, dirs_exist_ok=True)
+            return True
+
+        with patch("sieve.pipeline.discover_repos", return_value=iter([meta1])), \
+             patch("sieve.pipeline._clone_repo", side_effect=fake_clone):
+            summary = run_pipeline(config)
+
+        # Only reachable if Step 3b actually re-cloned and pulled the
+        # remaining functions in -- Step 3a alone had nothing to offer.
+        assert summary["total_functions"] == 6
+        assert clone_calls["n"] >= 3
