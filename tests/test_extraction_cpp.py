@@ -393,3 +393,132 @@ class TestPointerReturnTypes:
         funcs, _ = extract(code)
         unknown = [f for f in funcs if f.func_name == "unknown"]
         assert len(unknown) == 0
+
+
+# ─── Out-of-class qualified method definitions ────────────────────────────────
+
+class TestOutOfClassMethods:
+    def test_qualified_definition_marked_as_method(self):
+        # Regression test: func_name already correctly strips the
+        # "ClassName::" qualifier, but is_method/parent_class were derived
+        # purely from tree-recursion context and never consulted the
+        # qualifier itself -- so an out-of-class method definition (a very
+        # common C++ pattern: declare in .h, define in .cpp) was
+        # incorrectly reported as a free function.
+        funcs, _ = extract("""
+            Ref<Resource> ResourceLoader::load(const String &p_path) {
+                return nullptr;
+            }
+        """)
+        fn = funcs[0]
+        assert fn.func_name == "load"
+        assert fn.is_method is True
+        assert fn.parent_class == "ResourceLoader"
+
+    def test_nested_qualifier_uses_immediate_scope(self):
+        funcs, _ = extract("""
+            bool Log::LogMessage::valid() {
+                return true;
+            }
+        """)
+        fn = funcs[0]
+        assert fn.func_name == "valid"
+        assert fn.is_method is True
+        assert fn.parent_class == "LogMessage"
+
+    def test_free_function_still_not_a_method(self):
+        funcs, _ = extract("""
+            void free_function(int x) {}
+        """)
+        fn = funcs[0]
+        assert fn.is_method is False
+        assert fn.parent_class is None
+
+
+# ─── Operator overloads and conversion operators ──────────────────────────────
+
+class TestOperatorNames:
+    def test_operator_overload_name_extracted(self):
+        _, classes = extract("""
+            class Foo {
+                int operator[](int i) { return i; }
+            };
+        """)
+        assert "operator[]" in classes[0].method_names
+        assert "unknown" not in classes[0].method_names
+
+    def test_conversion_operator_name_extracted(self):
+        _, classes = extract("""
+            class Foo {
+                operator int() const { return 0; }
+            };
+        """)
+        assert "operator int" in classes[0].method_names
+        assert "unknown" not in classes[0].method_names
+
+    def test_pointer_conversion_operator_name_extracted(self):
+        # Edge case: the parameter list nests one level deeper for
+        # pointer/reference conversion targets (abstract_pointer_declarator
+        # wrapping abstract_function_declarator).
+        _, classes = extract("""
+            class Ptr {
+            public:
+                template<class T> operator T*() const { return nullptr; }
+            };
+        """)
+        assert classes[0].method_names == ["operator T*"]
+
+    def test_conversion_operator_has_no_parameters(self):
+        funcs, _ = extract("""
+            struct Foo {
+                operator int() const { return 0; }
+            };
+        """)
+        # class-body walk also emits a FunctionRecord for the method
+        method = next(f for f in funcs if f.func_name == "operator int")
+        assert method.parameters == []
+
+
+# ─── Template specializations and template member methods ────────────────────
+
+class TestTemplateSpecializations:
+    def test_specialized_class_name_extracted(self):
+        # Regression test: class_specifier's name is wrapped one level
+        # deeper (template_type -> type_identifier) for specializations,
+        # not a direct-child type_identifier like a normal class.
+        _, classes = extract("""
+            template<> class Array<int, 4> {
+            public:
+                int get() { return 0; }
+            };
+        """)
+        assert classes[0].class_name == "Array"
+        assert classes[0].class_name != "unknown"
+
+    def test_templated_member_method_visible(self):
+        # Regression test: templated methods are wrapped in
+        # template_declaration inside the class body, which the class-body
+        # method scan previously never unwrapped (unlike the top-level walk,
+        # which already did) -- so these methods were entirely invisible.
+        _, classes = extract("""
+            class Ptr {
+            public:
+                template<class T> operator T*() const { return nullptr; }
+            };
+        """)
+        assert classes[0].method_count == 1
+        assert len(classes[0].method_names) == 1
+
+    def test_has_constructor_collision_guard(self):
+        # Regression test: when both class_name and a method name
+        # independently fall back to "unknown" (e.g. an unresolved
+        # specialization alongside an unresolved operator overload),
+        # they must not spuriously "match" and produce a false
+        # has_constructor=True.
+        _, classes = extract("""
+            template<> class numeric_limits<BFloat16> {
+            public:
+                BFloat16 operator[](int i) { return BFloat16(); }
+            };
+        """)
+        assert classes[0].has_constructor is False

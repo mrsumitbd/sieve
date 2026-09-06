@@ -50,6 +50,30 @@ class TestFunctionExtraction:
         assert "name" in fn.parameters
         assert "greeting" in fn.parameters
 
+    def test_destructured_object_parameter_captured(self):
+        # Regression test: object_pattern was previously silently dropped
+        # entirely rather than captured, even in plain .js (not TS-specific) --
+        # confirmed on a real-world Vite config's manualChunks(id, { ... }).
+        funcs, _ = extract("""
+            function manualChunks(id, { getModuleInfo, getModuleIds }) {
+                return id;
+            }
+        """)
+        fn = next(f for f in funcs if f.func_name == "manualChunks")
+        assert len(fn.parameters) == 2
+        assert fn.parameters[0] == "id"
+        assert "getModuleInfo" in fn.parameters[1]
+
+    def test_destructured_array_parameter_captured(self):
+        funcs, _ = extract("""
+            function first([a, b]) {
+                return a;
+            }
+        """)
+        fn = next(f for f in funcs if f.func_name == "first")
+        assert len(fn.parameters) == 1
+        assert "a" in fn.parameters[0]
+
     def test_signature_has_no_body(self):
         funcs, _ = extract("""
             function add(a, b) {
@@ -120,6 +144,23 @@ class TestClassExtraction:
         skeleton = classes[0].skeleton
         assert "add" in skeleton
         assert "return" not in skeleton
+
+
+class TestLanguageExtensions:
+    def test_typescript_extensions_excluded(self):
+        # Regression test: .ts/.tsx were previously included under
+        # "JavaScript" even though SIEVE only ships a JavaScript grammar
+        # with no real TypeScript support -- parsing .ts/.tsx with it
+        # silently corrupted typed parameters rather than failing loudly
+        # (e.g. "store: Store" misparsed with "Store" captured as if it
+        # were the parameter name). TypeScript is out of scope; only
+        # extensions SIEVE can actually parse correctly should be listed.
+        from sieve.core.extraction import LANGUAGE_EXTENSIONS
+        js_extensions = LANGUAGE_EXTENSIONS["JavaScript"]
+        assert ".ts" not in js_extensions
+        assert ".tsx" not in js_extensions
+        assert ".js" in js_extensions
+        assert ".jsx" in js_extensions
 
 
 class TestImportDetection:

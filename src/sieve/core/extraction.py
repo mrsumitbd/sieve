@@ -608,7 +608,14 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
             parent_classes = []
             if bases_node:
                 for b in bases_node.children:
-                    if b.type not in (",", "(", ")", "comment"):
+                    # `superclasses` is tree-sitter's argument_list node, which
+                    # holds real base classes AND any keyword arguments (e.g.
+                    # `class Foo(TypedDict, total=False)` or
+                    # `class Foo(Base, metaclass=ABCMeta)`) as siblings.
+                    # keyword_argument nodes are not base classes and must be
+                    # excluded, or e.g. "total=False" ends up listed as a
+                    # parent class name.
+                    if b.type not in (",", "(", ")", "comment", "keyword_argument"):
                         parent_classes.append(_node_text(b, source_bytes))
 
             docstring = _extract_python_docstring(node, source_bytes)
@@ -1131,7 +1138,13 @@ def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRe
         for child in node.children:
             if child.type == "formal_parameters":
                 for p in child.children:
-                    if p.type in ("identifier", "assignment_pattern", "rest_pattern"):
+                    # object_pattern (`{a, b}`) and array_pattern (`[c, d]`)
+                    # destructuring were previously silently dropped entirely
+                    # rather than captured as raw text -- confirmed on a plain
+                    # .js file (manualChunks(id, { getModuleInfo, ... })), so
+                    # this is a general JS gap, not a TypeScript-only symptom.
+                    if p.type in ("identifier", "assignment_pattern", "rest_pattern",
+                                  "object_pattern", "array_pattern"):
                         params.append(_node_text(p, source_bytes))
             elif child.type == "identifier" and is_arrow:
                 # single-param arrow: x => x * 2
@@ -1244,16 +1257,64 @@ def _cpp_find_function_declarator(func_node) -> Optional[object]:
         result = _search(child)
         if result:
             return result
+        # Conversion operators (`operator int() const { ... }`) are not
+        # wrapped in a function_declarator at all -- tree-sitter-cpp gives
+        # them their own operator_cast node as a direct sibling, containing
+        # the target type plus an abstract_function_declarator for the
+        # (always-empty) parameter list. Return the operator_cast node
+        # itself; callers that need it check for this type specifically.
+        if child.type == "operator_cast":
+            return child
+    return None
+
+
+def _cpp_qualifier_from_declarator(decl_node, source_bytes: bytes) -> Optional[str]:
+    """
+    For an out-of-class qualified definition (e.g. `ResourceLoader::load`),
+    return the immediately-enclosing scope name ("ResourceLoader"). For a
+    nested qualifier (`Log::LogMessage::valid`), tree-sitter nests
+    qualified_identifier so the innermost one holds the immediate scope
+    ("LogMessage") alongside the final identifier -- that innermost
+    namespace_identifier is what we want, not the outermost one.
+    Returns None if the declarator isn't qualified at all (an in-class,
+    unqualified definition, or a free function).
+    """
+    for sub in decl_node.children:
+        if sub.type == "qualified_identifier":
+            # Descend to the innermost qualified_identifier.
+            node = sub
+            while True:
+                inner = next((c for c in node.children if c.type == "qualified_identifier"), None)
+                if inner is None:
+                    break
+                node = inner
+            scope = next((c for c in node.children if c.type == "namespace_identifier"), None)
+            return _node_text(scope, source_bytes) if scope else None
     return None
 
 
 def _cpp_extract_name_from_declarator(decl_node, source_bytes: bytes) -> str:
     """
     Extract function name from a function_declarator node.
-    Handles: identifier, field_identifier, qualified_identifier, destructor_name.
+    Handles: identifier, field_identifier, qualified_identifier, destructor_name,
+    operator_name (operator overloads, e.g. `operator[]`), and operator_cast
+    (conversion operators, e.g. `operator int()` -> "operator int").
     """
+    if decl_node.type == "operator_cast":
+        # Text-based rather than node-filtering: robust regardless of how
+        # deeply the parameter list ends up nested for pointer/reference
+        # conversion targets (`operator T*()`, `operator T&()`), since tree-
+        # sitter wraps those in an extra abstract_pointer_declarator /
+        # abstract_reference_declarator layer around abstract_function_declarator
+        # that a flat children-type filter would otherwise miss.
+        full_text = _node_text(decl_node, source_bytes)
+        before_parens = full_text.split("(", 1)[0].strip()
+        return before_parens if before_parens else "operator"
+
     for sub in decl_node.children:
         if sub.type in ("identifier", "field_identifier"):
+            return _node_text(sub, source_bytes)
+        elif sub.type == "operator_name":
             return _node_text(sub, source_bytes)
         elif sub.type == "qualified_identifier":
             # Walk to deepest identifier — e.g. Log::LogMessage::valid → 'valid'
@@ -1292,19 +1353,41 @@ def _cpp_function_params(func_node, source_bytes: bytes) -> list[str]:
     decl = _cpp_find_function_declarator(func_node)
     if not decl:
         return params
-    for sub in decl.children:
-        if sub.type == "parameter_list":
-            for p in sub.children:
-                if p.type == "parameter_declaration":
-                    # Last identifier in the declaration is the param name
-                    param_id = next(
-                        (c for c in reversed(p.children)
-                         if c.type in ("identifier", "reference_declarator",
-                                       "pointer_declarator")),
-                        None,
-                    )
-                    if param_id:
-                        params.append(_node_text(param_id, source_bytes))
+    # Conversion operators nest their (always-empty, by C++ rules)
+    # parameter_list inside abstract_function_declarator, which for a
+    # pointer/reference conversion target (`operator T*()`) is itself
+    # wrapped another level deep in abstract_pointer_declarator /
+    # abstract_reference_declarator -- search recursively rather than only
+    # checking direct children, the same way _cpp_find_function_declarator
+    # already does for the analogous pointer/reference return-type case.
+    def _find_parameter_list(node, depth=0):
+        if depth > 5:
+            return None
+        for c in node.children:
+            if c.type == "parameter_list":
+                return c
+            if c.type in ("abstract_function_declarator", "abstract_pointer_declarator",
+                          "abstract_reference_declarator"):
+                found = _find_parameter_list(c, depth + 1)
+                if found is not None:
+                    return found
+        return None
+
+    plist = _find_parameter_list(decl) if decl.type == "operator_cast" else next(
+        (c for c in decl.children if c.type == "parameter_list"), None
+    )
+    if plist is not None:
+        for p in plist.children:
+            if p.type == "parameter_declaration":
+                # Last identifier in the declaration is the param name
+                param_id = next(
+                    (c for c in reversed(p.children)
+                     if c.type in ("identifier", "reference_declarator",
+                                   "pointer_declarator")),
+                    None,
+                )
+                if param_id:
+                    params.append(_node_text(param_id, source_bytes))
     return params
 
 
@@ -1317,7 +1400,7 @@ def _cpp_return_type(func_node, source_bytes: bytes) -> Optional[str]:
     for child in func_node.children:
         # Stop at the declarator chain — pointer_declarator wraps function_declarator
         if child.type in ("function_declarator", "pointer_declarator",
-                          "reference_declarator"):
+                          "reference_declarator", "operator_cast"):
             break
         if child.type not in ("storage_class_specifier", "type_qualifier",
                                "virtual", "explicit", "inline", "static"):
@@ -1424,6 +1507,18 @@ def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionR
             name_node = next(
                 (c for c in node.children if c.type == "type_identifier"), None
             )
+            if name_node is None:
+                # Template specializations (`class Array<T, N> { ... }`) wrap
+                # the name one level deeper: template_type -> type_identifier,
+                # rather than a direct-child type_identifier.
+                template_type_node = next(
+                    (c for c in node.children if c.type == "template_type"), None
+                )
+                if template_type_node is not None:
+                    name_node = next(
+                        (c for c in template_type_node.children if c.type == "type_identifier"),
+                        None,
+                    )
             class_name = _node_text(name_node, source_bytes) if name_node else "unknown"
 
             # Base classes
@@ -1445,10 +1540,24 @@ def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionR
             for child in node.children:
                 if child.type == "field_declaration_list":
                     for item in child.children:
-                        if item.type == "function_definition":
-                            mname = _cpp_function_name(item, source_bytes)
+                        # Templated methods (`template<class T> operator T*() ...`)
+                        # are wrapped in template_declaration; unwrap it the
+                        # same way the top-level walk already does for
+                        # top-level templated functions/classes, or these
+                        # methods are entirely invisible here.
+                        method_item = item
+                        if item.type == "template_declaration":
+                            method_item = next(
+                                (c for c in item.children if c.type == "function_definition"),
+                                None,
+                            )
+                        if method_item is not None and method_item.type == "function_definition":
+                            mname = _cpp_function_name(method_item, source_bytes)
                             method_names.append(mname)
-                            if mname == class_name:
+                            # Guard against both class_name and mname
+                            # independently falling back to the "unknown"
+                            # sentinel and spuriously "matching" each other.
+                            if mname == class_name and mname != "unknown":
                                 has_constructor = True
 
             classes.append(ClassRecord(
@@ -1473,13 +1582,28 @@ def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionR
             for child in node.children:
                 if child.type == "field_declaration_list":
                     for item in child.children:
-                        walk(item, parent_class=class_name, _depth=_depth + 1)
+                        walk_item = item
+                        if item.type == "template_declaration":
+                            walk_item = next(
+                                (c for c in item.children if c.type == "function_definition"),
+                                None,
+                            )
+                        if walk_item is not None:
+                            walk(walk_item, parent_class=class_name, _depth=_depth + 1)
 
         elif node.type == "function_definition":
             func_name = _cpp_function_name(node, source_bytes)
 
-            # Skip if this is a method we already walked via class body
-            # (parent_class is set when called from class walk above)
+            # An out-of-class definition (`ResourceLoader::load(...) { ... }`)
+            # is a real method even though tree-recursion never descended
+            # into a class body to reach it -- the qualifier itself is
+            # authoritative evidence of that, and func_name already strips
+            # it when deriving the name, so use the same information here.
+            decl = _cpp_find_function_declarator(node)
+            qualifier = _cpp_qualifier_from_declarator(decl, source_bytes) if decl else None
+            effective_parent_class = parent_class if parent_class is not None else qualifier
+            effective_is_method = effective_parent_class is not None
+
             params = _cpp_function_params(node, source_bytes)
             ret_annotation = _cpp_return_type(node, source_bytes)
             docstring = _cpp_preceding_comment(node, source_bytes)
@@ -1506,8 +1630,8 @@ def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionR
                 used_imports=used_imports,
                 start_line=node.start_point[0] + 1,
                 end_line=node.end_point[0] + 1,
-                is_method=parent_class is not None,
-                parent_class=parent_class,
+                is_method=effective_is_method,
+                parent_class=effective_parent_class,
                 decorators=[],
             ))
 
@@ -1537,7 +1661,13 @@ def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionR
 LANGUAGE_EXTENSIONS = {
     "Python": {".py"},
     "Java": {".java"},
-    "JavaScript": {".js", ".ts", ".jsx", ".tsx"},
+    # .ts/.tsx deliberately excluded: SIEVE only ships a JavaScript grammar
+    # (tree-sitter-javascript), which has no real TypeScript support. Parsing
+    # .ts/.tsx with it silently corrupts typed parameters (e.g. "store: Store"
+    # is misparsed and the type name gets stored as if it were the parameter
+    # name) rather than failing loudly. TypeScript is out of scope; only
+    # ingest files SIEVE can actually parse correctly.
+    "JavaScript": {".js", ".jsx"},
     "C++": {".cpp", ".cc", ".cxx", ".h", ".hpp", ".hxx"},
 }
 

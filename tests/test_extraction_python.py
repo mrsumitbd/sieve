@@ -191,6 +191,30 @@ class TestClassExtraction:
         assert "Animal" in classes[0].parent_classes
         assert "Mammal" in classes[0].parent_classes
 
+    def test_keyword_argument_excluded_from_parent_classes(self):
+        # Regression test: a class definition can carry keyword arguments
+        # alongside real base classes (e.g. TypedDict's `total=False`, or a
+        # metaclass=... hook). tree-sitter's superclasses/argument_list node
+        # holds both as siblings; only the real base classes should end up
+        # in parent_classes.
+        _, classes = extract("""
+            from typing import TypedDict
+
+            class Config(TypedDict, total=False):
+                name: str
+        """)
+        assert classes[0].parent_classes == ["TypedDict"]
+        assert "total=False" not in classes[0].parent_classes
+        assert not any("total" in p for p in classes[0].parent_classes)
+
+    def test_metaclass_keyword_excluded_from_parent_classes(self):
+        _, classes = extract("""
+            class Foo(Base, metaclass=ABCMeta):
+                pass
+        """)
+        assert classes[0].parent_classes == ["Base"]
+        assert not any("metaclass" in p for p in classes[0].parent_classes)
+
     def test_has_constructor_true(self):
         _, classes = extract("""
             class Foo:
