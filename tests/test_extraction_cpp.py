@@ -434,6 +434,41 @@ class TestOutOfClassMethods:
         assert fn.is_method is False
         assert fn.parent_class is None
 
+    def test_qualified_destructor_name_extracted(self):
+        # Regression test: is_method/parent_class were already correctly
+        # derived from the qualifier (fixed above), but the name-extraction
+        # walk for qualified_identifier only recognized identifier/
+        # field_identifier as terminal nodes -- destructor_name (the node
+        # type tree-sitter uses for "~ClassName") fell through to "unknown"
+        # even though the qualifier itself resolved correctly.
+        funcs, _ = extract("""
+            LawnApp::~LawnApp()
+            {
+                cleanup();
+            }
+        """)
+        fn = funcs[0]
+        assert fn.func_name == "~LawnApp"
+        assert fn.func_name != "unknown"
+        assert fn.is_method is True
+        assert fn.parent_class == "LawnApp"
+
+    def test_nested_qualified_destructor_name_extracted(self):
+        funcs, _ = extract("""
+            Log::LogMessage::~LogMessage() { flush(); }
+        """)
+        fn = funcs[0]
+        assert fn.func_name == "~LogMessage"
+        assert fn.parent_class == "LogMessage"
+
+    def test_qualified_operator_overload_name_extracted(self):
+        funcs, _ = extract("""
+            int Matrix::operator[](int i) { return data[i]; }
+        """)
+        fn = funcs[0]
+        assert fn.func_name == "operator[]"
+        assert fn.parent_class == "Matrix"
+
 
 # ─── Operator overloads and conversion operators ──────────────────────────────
 

@@ -1370,10 +1370,19 @@ def _cpp_extract_name_from_declarator(decl_node, source_bytes: bytes) -> str:
         elif sub.type == "operator_name":
             return _node_text(sub, source_bytes)
         elif sub.type == "qualified_identifier":
-            # Walk to deepest identifier — e.g. Log::LogMessage::valid → 'valid'
+            # Walk to deepest name-bearing node — e.g. Log::LogMessage::valid
+            # -> 'valid', or LawnApp::~LawnApp -> '~LawnApp' (a qualified,
+            # out-of-class destructor definition: destructor_name and
+            # operator_name are also valid terminal nodes here, not just
+            # plain identifier/field_identifier -- previously missing this
+            # meant any qualified destructor or qualified operator overload
+            # fell through to "unknown" even though is_method/parent_class
+            # were already being derived correctly from the same qualifier.
             def _last_id(n) -> Optional[str]:
                 for c in reversed(n.children):
                     if c.type in ("identifier", "field_identifier"):
+                        return _node_text(c, source_bytes)
+                    elif c.type in ("destructor_name", "operator_name"):
                         return _node_text(c, source_bytes)
                     elif c.type == "qualified_identifier":
                         r = _last_id(c)
