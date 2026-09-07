@@ -1001,41 +1001,94 @@ def _build_js_skeleton(class_node, source_bytes: bytes) -> str:
     return "\n".join(lines)
 
 
+def _js_require_bound_names(declarator, source_bytes: bytes) -> list[str]:
+    """
+    Given a variable_declarator whose value is a require(...) call, return
+    the name(s) it binds:
+      const os = require('os')                    -> ["os"]
+      const { readFile, writeFile: wf } = require('fs')
+                                                    -> ["readFile", "wf"]
+    For a renamed destructure (`writeFile: wf`), the *alias* is what's
+    actually usable in the rest of the code, not the original property name.
+    """
+    names = []
+    target = next(
+        (c for c in declarator.children if c.type in ("identifier", "object_pattern")),
+        None,
+    )
+    if target is None:
+        return names
+    if target.type == "identifier":
+        names.append(_node_text(target, source_bytes))
+    elif target.type == "object_pattern":
+        for sub in target.children:
+            if sub.type == "shorthand_property_identifier_pattern":
+                names.append(_node_text(sub, source_bytes))
+            elif sub.type == "pair_pattern":
+                alias = next((c for c in sub.children if c.type == "identifier"), None)
+                if alias:
+                    names.append(_node_text(alias, source_bytes))
+    return names
+
+
 def _collect_js_imports(root, source_bytes: bytes) -> list[tuple[str, list[str]]]:
     """
-    Collect ES6 import statements.
-    Handles: default imports, named imports, namespace imports.
+    Collect both ES6 import statements and CommonJS require() calls.
+    ES6: default imports, named imports, namespace imports.
+    CommonJS: `const x = require('y')` and destructured
+    `const { a, b: c } = require('y')`, at the file's top level.
     """
     results = []
     for node in root.children:
-        if node.type != "import_statement":
-            continue
-        stmt_text = _node_text(node, source_bytes)
-        names = []
-        for child in node.children:
-            if child.type == "import_clause":
-                for sub in child.children:
-                    if sub.type == "identifier":
-                        # default import: import fs from '...'
-                        names.append(_node_text(sub, source_bytes))
-                    elif sub.type == "named_imports":
-                        # named: import { A, B as C }
-                        for spec in sub.children:
-                            if spec.type == "import_specifier":
-                                # alias takes priority
-                                alias = spec.child_by_field_name("alias")
-                                name_node = spec.child_by_field_name("name")
-                                if alias:
-                                    names.append(_node_text(alias, source_bytes))
-                                elif name_node:
-                                    names.append(_node_text(name_node, source_bytes))
-                    elif sub.type == "namespace_import":
-                        # import * as path
-                        for ns in sub.children:
-                            if ns.type == "identifier":
-                                names.append(_node_text(ns, source_bytes))
-        if names:
-            results.append((stmt_text, names))
+        if node.type == "import_statement":
+            stmt_text = _node_text(node, source_bytes)
+            names = []
+            for child in node.children:
+                if child.type == "import_clause":
+                    for sub in child.children:
+                        if sub.type == "identifier":
+                            # default import: import fs from '...'
+                            names.append(_node_text(sub, source_bytes))
+                        elif sub.type == "named_imports":
+                            # named: import { A, B as C }
+                            for spec in sub.children:
+                                if spec.type == "import_specifier":
+                                    # alias takes priority
+                                    alias = spec.child_by_field_name("alias")
+                                    name_node = spec.child_by_field_name("name")
+                                    if alias:
+                                        names.append(_node_text(alias, source_bytes))
+                                    elif name_node:
+                                        names.append(_node_text(name_node, source_bytes))
+                        elif sub.type == "namespace_import":
+                            # import * as path
+                            for ns in sub.children:
+                                if ns.type == "identifier":
+                                    names.append(_node_text(ns, source_bytes))
+            if names:
+                results.append((stmt_text, names))
+
+        elif node.type in ("lexical_declaration", "variable_declaration"):
+            # CommonJS: const/let/var x = require('y'), or destructured.
+            # Previously entirely unrecognized -- every require()-based
+            # dependency was invisible to used_imports regardless of
+            # whether it was actually used in the code.
+            for declarator in node.children:
+                if declarator.type != "variable_declarator":
+                    continue
+                value = declarator.child_by_field_name("value")
+                if value is None or value.type != "call_expression":
+                    continue
+                callee = value.child_by_field_name("function")
+                if callee is None or callee.type != "identifier":
+                    continue
+                if _node_text(callee, source_bytes) != "require":
+                    continue
+                names = _js_require_bound_names(declarator, source_bytes)
+                if names:
+                    stmt_text = _node_text(node, source_bytes)
+                    results.append((stmt_text, names))
+
     return results
 
 

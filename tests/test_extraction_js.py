@@ -206,3 +206,59 @@ class TestImportDetection:
         """)
         fn = next(f for f in funcs if f.func_name == "add")
         assert fn.used_imports == []
+
+    def test_commonjs_plain_require_detected(self):
+        # Regression test: _collect_js_imports previously only recognized
+        # ES6 import_statement nodes -- require() calls were entirely
+        # invisible to it, regardless of whether the required module was
+        # actually used. Confirmed on real-world data: a function calling
+        # os.homedir() showed used_imports=[] despite `const os =
+        # require('os')` sitting right above it.
+        funcs, _ = extract("""
+            const os = require('os');
+
+            function getHomeDir() {
+                return os.homedir();
+            }
+        """)
+        fn = next(f for f in funcs if f.func_name == "getHomeDir")
+        assert any("os" in imp for imp in fn.used_imports)
+
+    def test_commonjs_destructured_require_detected(self):
+        funcs, _ = extract("""
+            const { readFile } = require('fs');
+
+            function loadConfig() {
+                return readFile('config.json');
+            }
+        """)
+        fn = next(f for f in funcs if f.func_name == "loadConfig")
+        assert any("readFile" in imp for imp in fn.used_imports)
+
+    def test_commonjs_destructured_require_with_alias(self):
+        # The bound name after `writeFile: wf` is `wf` -- that's what's
+        # actually usable in the code, not the original property name.
+        funcs, _ = extract("""
+            const { writeFile: wf } = require('fs');
+
+            function saveConfig(data) {
+                return wf('config.json', data);
+            }
+
+            function unrelated() {
+                return 42;
+            }
+        """)
+        save_fn = next(f for f in funcs if f.func_name == "saveConfig")
+        unrelated_fn = next(f for f in funcs if f.func_name == "unrelated")
+        assert any("wf" in imp for imp in save_fn.used_imports)
+        assert unrelated_fn.used_imports == []
+
+    def test_commonjs_unused_require_excluded(self):
+        funcs, _ = extract("""
+            const os = require('os');
+
+            function add(a, b) { return a + b; }
+        """)
+        fn = next(f for f in funcs if f.func_name == "add")
+        assert fn.used_imports == []
