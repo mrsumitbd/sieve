@@ -17,7 +17,45 @@ st.title("📖 SIEVE Documentation")
 st.caption("**S**oftware **I**ngestion & **E**xtraction for **V**erifiable **E**valuation")
 st.divider()
 
-# ─── Overview ─────────────────────────────────────────────────────────────────
+# ─── What is SIEVE? ───────────────────────────────────────────────────────────
+
+st.header("What is SIEVE?")
+st.markdown("""
+SIEVE is a **parameterized GitHub corpus builder** for software engineering
+research. Rather than a static, pre-built dataset, SIEVE is a *tool* you run
+with your own settings — programming language, granularity (functions/methods
+vs. classes), repository quality, and repository creation date — to build the
+corpus a given study actually needs, sourced fresh from GitHub each time.
+
+SIEVE extracts two types of program units:
+- **Functions** — CodeSearchNet-style records with full source, signature, parameters, return type, and docstring.
+- **Classes** — OpenClassEval-style records with full source, skeleton, method list, and inheritance.
+
+Both record types include the import statements used within the extracted unit,
+enabling self-contained code snippets for prompting or evaluation. Every record
+is also annotated with 23 structural code metrics, an optional AI-generation
+likelihood score, parsed dependency information, and (optionally) full AST
+features — supporting research well beyond any single use case.
+""")
+
+st.divider()
+
+# ─── Use Cases ─────────────────────────────────────────────────────────────────
+
+st.header("Use Cases")
+st.markdown("""
+The same underlying pipeline supports several kinds of SE research, depending
+on which parameters you configure:
+
+- **Contamination-free LLM evaluation.** Filter repositories by *creation date* (not last push date) to guarantee that extracted code post-dates a model's training cutoff — see **Contamination-Aware Evaluation** below for the full rationale and a cutoff-date reference table.
+- **Dependency-management research.** Every processed repository's package manifest is parsed automatically; the corpus manifest and the **Dependency Graph** panel expose these for supply-chain and library-usage studies.
+- **Structural analysis of LLM-generated code.** Enable **Annotate LLM Score** and **Export AST** to get a P(AI-generated) probability and full parse-tree features on every record — useful for studying how AI-authored and human-authored code differ structurally.
+- **General-purpose corpus building.** The creation-date filter is equally useful for bounding a corpus to a specific development era for longitudinal studies, independent of any LLM — or simply source a fresh, richly-annotated, deduplicated corpus for any language-specific study.
+""")
+
+st.divider()
+
+# ─── Contamination-Aware Evaluation ────────────────────────────────────────────
 
 st.header("Contamination-Aware Evaluation")
 st.markdown("""
@@ -59,53 +97,134 @@ construction.
 
 ### How to Choose Your Cutoff Date
 
-Set **Start Date** to the training cutoff of the LLM(s) you are studying. Some
-reference points:
+**Use the model's public release date, not its knowledge cutoff, when you need
+the strongest guarantee.** These are often confused but are different: the
+knowledge cutoff is the last date of data used for *pre-training*, while the
+release date is when the model became publicly available. Between the two,
+models are typically fine-tuned on additional data (instruction-following
+examples, RLHF preference data, sometimes supervised fine-tuning on code) —
+data that postdates the pre-training cutoff but predates the release. Setting
+**Start Date** to the release date guarantees your corpus postdates both the
+pre-training *and* fine-tuning phases; setting it to the knowledge cutoff only
+guarantees the former.
 
-| Model | Approximate Training Cutoff |
-|---|---|
-| GPT-3.5 (ChatGPT) | September 2021 |
-| GPT-4 | April 2023 |
-| GPT-4o | October 2023 |
-| Claude 3 (Haiku/Sonnet/Opus) | August 2023 |
-| Claude 3.5 Sonnet | April 2024 |
-| Gemini 1.5 Pro | November 2023 |
-| Llama 3 (8B/70B) | December 2023 |
-| CodeLlama | January 2023 |
+If studying multiple models simultaneously, use whichever date (cutoff or
+release, per the column you're using) is **latest** among them, to guarantee
+contamination-free data for all.
 
-If studying multiple models simultaneously, use the **latest** cutoff among them
-to guarantee contamination-free data for all.
+**Reference table.** Verified against official provider documentation and
+model cards; "—" means the provider has not publicly disclosed a knowledge
+cutoff for that model. Coverage is necessarily a snapshot — always check the
+provider's own model card for anything released after this table was last
+updated, or for a model not listed here.
+
+**OpenAI**
+
+| Model | Release Date | Knowledge Cutoff |
+|---|---|---|
+| GPT-3.5 Turbo | Nov 2022 | Sep 2021 |
+| GPT-4 | Mar 2023 | Sep 2021 |
+| GPT-4 Turbo | Nov 2023 | Apr 2023 |
+| GPT-4o | May 2024 | Oct 2023 |
+| GPT-4.5 | Feb 2025 | Oct 2023 |
+| GPT-4.1 | Apr 2025 | Jun 2024 |
+| o1 | Dec 2024 | Oct 2023 |
+| o3 | Apr 2025 | Jun 2024 |
+| GPT-5 | Aug 2025 | Sep 2024 |
+| GPT-5.1 | Nov 2025 | Sep 2024 |
+
+**Anthropic** (knowledge cutoff shown is the "reliable" cutoff for Claude 4+ models, per Anthropic's own distinction between reliable and broader training-data cutoffs)
+
+| Model | Release Date | Knowledge Cutoff |
+|---|---|---|
+| Claude 3 (Haiku/Sonnet/Opus) | Mar 2024 | Aug 2023 |
+| Claude 3.5 Sonnet | Jun 2024 | Apr 2024 |
+| Claude 3.5 Haiku | Nov 2024 | Jul 2024 |
+| Claude 3.7 Sonnet | Feb 2025 | Oct 2024 |
+| Claude Opus 4 / Sonnet 4 | May 2025 | Mar 2025 |
+| Claude Sonnet 4.5 | Sep 2025 | Jan 2025 |
+| Claude Haiku 4.5 | Oct 2025 | Feb 2025 |
+| Claude Opus 4.5 | Nov 2025 | May 2025 |
+| Claude Sonnet 5 | Jun 2026 | Jan 2026 |
+| Claude Opus 5 | Jul 2026 | May 2026 |
+
+**Google**
+
+| Model | Release Date | Knowledge Cutoff |
+|---|---|---|
+| Gemini 1.0 Pro | Dec 2023 | Feb 2023 |
+| Gemini 1.5 Pro | Feb 2024 | May 2024 |
+| Gemini 1.5 Flash | May 2024 | May 2024 |
+| Gemini 2.0 Flash | Dec 2024 | Aug 2024 |
+| Gemini 2.5 Pro | Mar 2025 | Jan 2025 |
+| Gemini 2.5 Flash | Apr 2025 | Jan 2025 |
+
+**Meta**
+
+| Model | Release Date | Knowledge Cutoff |
+|---|---|---|
+| Llama 2 | Jul 2023 | Sep 2022 |
+| Code Llama | Aug 2023 | Sep 2022 |
+| Llama 3 (8B / 70B) | Apr 2024 | Mar 2023 / Dec 2023 |
+| Llama 3.1 | Jul 2024 | Dec 2023 |
+| Llama 3.2 | Sep 2024 | Dec 2023 |
+| Llama 3.3 | Dec 2024 | Dec 2023 |
+| Llama 4 (Scout / Maverick) | Apr 2025 | Aug 2024 |
+
+**Mistral AI** (Mistral does not publicly disclose knowledge cutoffs for most models)
+
+| Model | Release Date | Knowledge Cutoff |
+|---|---|---|
+| Mistral 7B | Sep 2023 | — |
+| Mixtral 8x7B | Dec 2023 | — |
+| Mixtral 8x22B | Apr 2024 | — |
+| Codestral | May 2024 | — |
+| Mistral Large 2 | Jul 2024 | — |
+
+**DeepSeek**
+
+| Model | Release Date | Knowledge Cutoff |
+|---|---|---|
+| DeepSeek-Coder | Nov 2023 | Mar 2023 |
+| DeepSeek-Coder-V2 | Jun 2024 | Nov 2023 |
+| DeepSeek-V3 | Dec 2024 | Jul 2024 |
+| DeepSeek-R1 | Jan 2025 | Jul 2024 |
+
+**Qwen (Alibaba)**
+
+| Model | Release Date | Knowledge Cutoff |
+|---|---|---|
+| Qwen2.5 | Sep 2024 | Late 2023 |
+| Qwen2.5-Coder | Sep 2024 | Late 2023 |
+
+**xAI** (does not publicly disclose knowledge cutoffs for Grok-1)
+
+| Model | Release Date | Knowledge Cutoff |
+|---|---|---|
+| Grok-1 | Nov 2023 | — |
+| Grok-3 | Feb 2025 | Nov 2024 |
+| Grok-4 | Jul 2025 | Nov 2024 |
+
+**BigCode** (does not publicly disclose a single knowledge cutoff date)
+
+| Model | Release Date | Knowledge Cutoff |
+|---|---|---|
+| StarCoder | May 2023 | — |
+| StarCoder2 | Feb 2024 | — |
 
 ### Reviewer Checklist
 
 When submitting papers that use SIEVE-generated corpora, you can state:
 
 > *"Our evaluation corpus was built using SIEVE, collecting only from GitHub
-> repositories created after [DATE]. By construction, no extracted code could have
-> appeared in the pre-training data of any model evaluated, as the repositories did
-> not exist at the time of training."*
+> repositories created after [DATE] (the release date of [Model]). By
+> construction, no extracted code could have appeared in the pre-training or
+> fine-tuning data of any evaluated model."*
 
 This satisfies the contamination check now required by most SE venues.
 """)
 
 st.divider()
-
-# ─── What is SIEVE? ───────────────────────────────────────────────────────────
-st.markdown("""
-SIEVE is a parameterized GitHub corpus builder for software engineering research.
-It addresses a core validity threat in LLM-based code studies: **benchmark contamination**.
-When training data and evaluation data overlap, benchmark scores are inflated and results
-are not reproducible. SIEVE mitigates this by letting you construct evaluation corpora
-**on demand** from repositories whose last activity falls within a user-defined date window
-— making it straightforward to target a period after a model's training cutoff.
-
-SIEVE extracts two types of program units:
-- **Functions** — CodeSearchNet-style records with full source, signature, parameters, return type, and docstring.
-- **Classes** — OpenClassEval-style records with full source, skeleton, method list, and inheritance.
-
-Both record types include the import statements used within the extracted unit, enabling
-self-contained code snippets for prompting or evaluation.
-""")
 
 st.divider()
 
@@ -117,14 +236,17 @@ st.subheader("Date Range")
 st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
-| **Start Date** | Only include repos **created** on or after this date. Set this to the LLM training cutoff date — any repo created after this date is guaranteed contamination-free, since it did not exist when the model was trained. |
+| **Start Date** | Only include repos **created** on or after this date — e.g. an LLM's training cutoff for contamination-free code, or any reference date to bound a corpus to a development era for other studies. |
 | **End Date** | Only include repos **created** on or before this date. Default: first of last month. Filters out very new repos with little code. |
 | **Min Last Activity** | Only include repos pushed on or after this date. Must be ≥ End Date. Default: same as End Date. Ensures repos are actively maintained rather than abandoned after creation. |
 
 The GitHub search query uses `created:START..END pushed:>=ACTIVITY`, filtering on
-**repository creation date** — not last push date. This is the correct approach for
-contamination-aware corpus building: a repo created after the cutoff cannot have
-existed in any LLM training dataset.
+**repository creation date** — not last push date. This distinction matters
+whenever you need to know when code was actually *written*, not just when a
+repo was last touched: for contamination-aware corpus building, a repo created
+after an LLM's cutoff cannot have existed in its training data; for longitudinal
+studies, the same filter lets you bound a corpus to a specific development era
+regardless of any LLM.
 
 **Guarantee:** If Start Date = Jan 1 2024, every extracted function and class is
 from code that was written after Jan 1 2024.

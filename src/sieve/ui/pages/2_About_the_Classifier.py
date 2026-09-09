@@ -124,7 +124,9 @@ st.info(
     "The classifier leans toward **higher recall** (97.09%) over precision "
     "(92.57%) — it is more likely to flag a human snippet as potentially "
     "AI-generated than to miss an AI-generated one. This is the right "
-    "trade-off for a contamination detection tool.",
+    "trade-off for a screening tool meant to flag likely AI-generated code "
+    "for downstream filtering, stratification, or analysis, where missing "
+    "a true positive is costlier than a false alarm.",
     icon="ℹ️",
 )
 

@@ -47,7 +47,7 @@ def run(
         None, "--config", "-c", help="Path to a JSON config file"
     ),
     language: Optional[str] = typer.Option(None, help="Programming language"),
-    start_date: Optional[str] = typer.Option(None, help="Repo creation lower bound (YYYY-MM-DD). Set to LLM release date for contamination-free data."),
+    start_date: Optional[str] = typer.Option(None, help="Repo creation lower bound (YYYY-MM-DD). E.g. an LLM's release date for contamination-free data, or any reference date to bound a corpus to a development era."),
     end_date: Optional[str] = typer.Option(None, help="Repo creation upper bound (YYYY-MM-DD). Defaults to one month before today."),
     min_stars: int = typer.Option(10, help="Minimum stars"),
     min_contributors: int = typer.Option(1, help="Minimum contributors"),

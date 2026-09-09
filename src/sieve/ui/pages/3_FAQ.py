@@ -19,6 +19,23 @@ st.divider()
 
 st.subheader("General")
 
+with st.expander("What is SIEVE?"):
+    st.markdown("""
+    **SIEVE** (Software Ingestion & Extraction for Verifiable Evaluation) is a
+    parameterized GitHub corpus builder for software engineering research. It
+    discovers repositories, extracts function- and class-level code snippets,
+    deduplicates them, and annotates each with structural code metrics, parsed
+    dependency information, and — optionally — an AI-generation likelihood
+    score (`llm_score`) and full AST features.
+
+    Rather than a static, pre-built dataset, SIEVE is a *tool* you run with
+    your own settings to build the corpus a given study needs: **contamination-free
+    LLM evaluation** (by restricting discovery to repositories created after a
+    configurable cutoff date), **dependency-management research**, **structural
+    analysis of LLM-generated code**, or general-purpose corpus building for
+    any language-specific study.
+    """)
+
 with st.expander("What is data contamination and why does it matter?"):
     st.markdown("""
     **Data contamination** occurs when code used to evaluate an LLM was part of
@@ -86,18 +103,10 @@ with st.expander("What training cutoff dates should I use?"):
     (sometimes weeks, sometimes months) where fine-tuning data could
     contaminate your evaluation set.
 
-    Reference release dates for common models:
-
-    | Model | Release Date |
-    |---|---|
-    | GPT-3.5 (ChatGPT) | November 2022 |
-    | GPT-4 | March 2023 |
-    | GPT-4o | May 2024 |
-    | Claude 3 (Haiku/Sonnet/Opus) | March 2024 |
-    | Claude 3.5 Sonnet | June 2024 |
-    | Gemini 1.5 Pro | February 2024 |
-    | Llama 3 (8B/70B) | April 2024 |
-    | CodeLlama | August 2023 |
+    For release dates and knowledge cutoffs across ~40 models from OpenAI,
+    Anthropic, Google, Meta, Mistral, DeepSeek, Qwen, xAI, and BigCode, see
+    the reference table on the **Documentation** page (Contamination-Aware
+    Evaluation → How to Choose Your Cutoff Date).
 
     If evaluating multiple models simultaneously, use the **latest** release
     date among them to guarantee contamination-free data for all.
@@ -107,18 +116,6 @@ with st.expander("What training cutoff dates should I use?"):
     > repositories created after [DATE] (the release date of [Model]).
     > By construction, no extracted code could have appeared in the
     > pre-training or fine-tuning data of any evaluated model."*
-    """)
-    st.markdown("""
-    **SIEVE** (Software Ingestion & Extraction for Verifiable Evaluation) is a
-    parameterized GitHub corpus builder for software engineering research. It
-    discovers repositories, extracts function and class-level code snippets,
-    deduplicates them, and optionally annotates each snippet with a
-    contamination indicator (`llm_score`).
-
-    The key design goal is **contamination-awareness**: by restricting discovery
-    to repositories created or last updated after a configurable cutoff date,
-    SIEVE ensures the corpus is unlikely to have been seen during the pre-training
-    of large language models — making it suitable for rigorous LLM evaluation.
     """)
 
 with st.expander("What does 'contamination-free' mean?"):
@@ -391,9 +388,9 @@ with st.expander("How do I cite SIEVE?"):
 
     ```bibtex
     @inproceedings{rahman2027sieve,
-      title     = {{SIEVE}: A Contamination-Aware GitHub Corpus Builder for
+      title     = {{SIEVE}: A Parameterized GitHub Corpus Builder for
                    Software Engineering Research},
-      author    = {Rahman, Musfiqur and Shihab, Emad},
+      author    = {Rahman, Musfiqur and Begoug, Mahi and Shihab, Emad},
       booktitle = {Proceedings of the 24th International Conference on
                    Mining Software Repositories (MSR)},
       year      = {2027}

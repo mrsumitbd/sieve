@@ -92,16 +92,22 @@ for key in ("summary", "error", "sample", "output_dir_path", "pipeline_log"):
 
 st.title("🔬 SIEVE")
 st.caption("**S**oftware **I**ngestion & **E**xtraction for **V**erifiable **E**valuation")
-st.markdown("Curate contamination-aware code corpora from GitHub for SE research.")
+st.markdown(
+    "Build parameterized, richly-annotated code corpora from GitHub for software "
+    "engineering research — across four languages, two granularities, and full "
+    "control over repository quality and creation date."
+)
 
 st.info(
-    "**Why contamination-free data matters** — "
-    "LLMs trained on public GitHub code may \"remember\" any repository that existed "
-    "before their training cutoff. Evaluating on that code produces inflated, unreliable "
-    "results. SIEVE collects only from repositories **created after your specified cutoff**, "
-    "guaranteeing no overlap with training data. "
-    "See the **Documentation** page for the full rationale and how to choose your cutoff date.",
-    icon="🛡️",
+    "**What can you do with SIEVE?** — "
+    "Source **contamination-free evaluation data** by restricting to repositories "
+    "created after an LLM's training cutoff; extract **dependency graphs** for "
+    "supply-chain and library-usage studies; annotate code with an **AI-generation "
+    "likelihood score** and full **AST features** for structural analysis of "
+    "LLM-generated vs. human-written code; or simply build a fresh, richly-annotated "
+    "corpus for any language-specific study. "
+    "See the **Documentation** page for the full parameter reference and use-case details.",
+    icon="🧰",
 )
 
 st.divider()

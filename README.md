@@ -18,7 +18,7 @@ pinned: false
 ![Languages](https://img.shields.io/badge/languages-Python%20%7C%20Java%20%7C%20JavaScript%20%7C%20C%2B%2B-orange?style=flat-square)
 ![Venue](https://img.shields.io/badge/venue-MSR%202027%20Dublin-blueviolet?style=flat-square)
 
-SIEVE is a parameterized GitHub corpus builder for software engineering research. It lets you curate contamination-aware, high-quality code datasets from public repositories with full control over language, recency, repository quality, and extraction granularity.
+SIEVE is a parameterized GitHub corpus builder for software engineering research. It lets you curate high-quality code datasets from public repositories with full control over language, recency, repository quality, and extraction granularity — for LLM evaluation, dependency analysis, structural studies of AI-generated code, or general-purpose corpus building.
 
 **Live demo:** https://mrahman2025-sieve.hf.space
 
@@ -26,7 +26,9 @@ SIEVE is a parameterized GitHub corpus builder for software engineering research
 
 ## Why SIEVE?
 
-Static benchmarks like HumanEval and CodeSearchNet have well-known contamination and saturation problems. SIEVE lets you build fresh corpora from post-cutoff repositories, ensuring your evaluation data was not part of any model's training set.
+Researchers building code corpora today either write one-off scraping scripts per study or reuse static, pre-built datasets like CodeSearchNet and The Stack — which offer no control over composition and, since they predate most LLMs, have well-known contamination and saturation problems as evaluation data. SIEVE is reusable infrastructure instead: point it at GitHub with the parameters your study needs (language, granularity, repository quality, creation date) and it builds a fresh, richly-annotated corpus on demand.
+
+One direct application is **contamination-free LLM evaluation** — restrict to repositories created after a model's training cutoff, and every extracted snippet is guaranteed unseen by construction. But the same pipeline supports dependency-management research (every record's package manifest is parsed automatically), structural analysis of LLM-generated code (via the built-in AI-generation classifier and AST export), and general-purpose corpus building for any language-specific study.
 
 ---
 
@@ -119,7 +121,7 @@ from sieve.pipeline import run_pipeline
 
 config = SIEVEConfig(
     language="Python",
-    start_date=date(2024, 1, 1),   # repo creation cutoff (contamination-free)
+    start_date=date(2024, 1, 1),   # repo creation lower bound (e.g. contamination-free)
     end_date=date(2025, 7, 1),     # repo creation upper bound
     min_last_activity=date(2025, 7, 1),  # must have been pushed after this date
     min_stars=50,
@@ -139,7 +141,7 @@ print(summary)
 | Parameter | Type | Description |
 |---|---|---|
 | `language` | str | Target language: `Python`, `Java`, `JavaScript`, `C++` |
-| `start_date` | date | Only include repos **created** on or after this date — set to LLM training cutoff for contamination-free code |
+| `start_date` | date | Only include repos **created** on or after this date — e.g. an LLM's training cutoff for contamination-free code, or any reference date to bound a corpus to a development era |
 | `end_date` | date | Only include repos **created** on or before this date (default: first of last month) |
 | `min_last_activity` | date | Only include repos pushed on or after this date — ensures active repos (default: same as `end_date`) |
 | `min_stars` | int | Minimum GitHub stars |

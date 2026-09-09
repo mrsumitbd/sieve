@@ -25,7 +25,7 @@ class ExportFormat(str, Enum):
 class SIEVEConfig(BaseModel):
     # --- Core filters ---
     language: Language = Field(..., description="Target programming language")
-    start_date: date = Field(..., description="Only include repos created on or after this date (contamination cutoff)")
+    start_date: date = Field(..., description="Only include repos created on or after this date — e.g. an LLM's release date for contamination-free data, or any reference date to bound a corpus to a development era")
     end_date: date = Field(..., description="Only include repos created on or before this date (default: one month before today)")
 
     @field_validator("end_date")
