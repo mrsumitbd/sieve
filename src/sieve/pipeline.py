@@ -361,7 +361,6 @@ def run_pipeline(
 
     for idx, repo_meta in enumerate(repos_to_process):
         repo_name = repo_meta.full_name
-        _progress(f"[{idx+1}/{total}] Processing {repo_name}", idx + 1, total)
 
         qm = quality_map.get(repo_name)
 
@@ -387,11 +386,13 @@ def run_pipeline(
 
         surplus_cache[repo_name] = (surplus_funcs, surplus_classes)
 
-        _progress(
-            f"  {repo_name}: {len(allocated_funcs)} functions, "
-            f"{len(allocated_classes)} classes",
-            idx + 1, total,
-        )
+        # One line per repo, after processing. Deliberately omits per-repo
+        # function/class counts: a low or zero count here is an internal
+        # signal that Pass 3 shortfall redistribution may need to top up
+        # the corpus from elsewhere -- showing that number without the
+        # context of what happens next would just read as alarming or
+        # confusing to a user watching the log.
+        _progress(f"[{idx+1}/{total}] Processed {repo_name}", idx + 1, total)
 
         all_functions.extend(allocated_funcs)
         all_classes.extend(allocated_classes)
