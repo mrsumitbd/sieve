@@ -226,21 +226,6 @@ with st.sidebar:
         help="Recommended. Without it, rate limit is 60 requests/hour.",
     )
 
-    import os
-    _survey_token_available = bool(os.environ.get("SIEVE_SURVEY_TOKEN"))
-    if _survey_token_available:
-        use_survey_token = st.toggle(
-            "🎓 Use our API token (survey participants)",
-            value=False,
-            help=(
-                "Toggle this on if you don't have a GitHub token. "
-                "Provided for survey participants only. "
-                "Please be considerate — run small corpora (Max Repos ≤ 20)."
-            ),
-        )
-    else:
-        use_survey_token = False
-
     run_button = st.button(
         "▶ Run SIEVE",
         type="primary",
@@ -278,12 +263,7 @@ if run_button:
         st.session_state.output_dir_path = tmp_dir
 
         try:
-            import os
-            resolved_token = (
-                os.environ.get("SIEVE_SURVEY_TOKEN")
-                if use_survey_token
-                else (github_token if github_token else None)
-            )
+            resolved_token = github_token if github_token else None
             config = SIEVEConfig(
                 language=language,
                 start_date=start_date,
