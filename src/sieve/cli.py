@@ -54,7 +54,7 @@ def run(
     max_repos: Optional[int] = typer.Option(None, help="Max repos to process (default: no cap)"),
     max_functions: Optional[int] = typer.Option(None, help="Max functions after deduplication — stratified by repo (default: no cap)"),
     max_classes: Optional[int] = typer.Option(None, help="Max classes after deduplication — stratified by repo (default: no cap)"),
-    engineered_only: bool = typer.Option(False, help="Apply engineered project filter (Munaiah et al., 2017)"),
+    engineered_only: bool = typer.Option(False, help="Apply engineered project filter (Xiao et al., 2025; in the spirit of Reaper, Munaiah et al., 2017)"),
     deduplicate: bool = typer.Option(True, help="Enable deduplication"),
     dedup_threshold: float = typer.Option(0.8, help="Dedup similarity threshold"),
     output_dir: str = typer.Option("./sieve_output", help="Output directory"),

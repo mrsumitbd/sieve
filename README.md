@@ -150,7 +150,7 @@ print(summary)
 | `max_functions` | int \| None | Cap on extracted functions (stratified by repo) |
 | `max_classes` | int \| None | Cap on extracted classes (stratified by repo) |
 | `granularity` | list | `function`, `class`, or both |
-| `engineered_only` | bool | Apply Munaiah et al. (2017) engineered project filter |
+| `engineered_only` | bool | Apply engineered project filter (Xiao et al., 2025; in the spirit of Reaper, Munaiah et al., 2017) |
 | `annotate_llm_score` | bool | Score each record with P(AI-generated) via CodeBERT classifier |
 | `export_ast` | bool | Add AST features to every record |
 | `deduplicate` | bool | Apply MinHash near-duplicate removal |

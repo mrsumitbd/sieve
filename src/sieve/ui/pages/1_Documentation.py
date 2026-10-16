@@ -273,7 +273,7 @@ st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
 | **Granularity** | Choose to extract functions, classes, or both. |
-| **Engineered Projects Only** | Applies the Munaiah et al. (2017) filter — see section below. Includes test suite presence as one of its signals. |
+| **Engineered Projects Only** | Applies the engineered project filter of Xiao et al. (2025), in the spirit of Reaper (Munaiah et al., 2017). See section below. |
 """)
 
 st.subheader("Deduplication")
@@ -837,9 +837,8 @@ The two-signal threshold avoids false positives from repos that have a single
 test file but no real test infrastructure, while still catching repos that use
 non-standard directory layouts.
 
-Test suite presence is also one of the signals used by the **Engineered Projects**
-filter (Munaiah et al., 2017) — repos without any test infrastructure are more
-likely to be personal or experimental projects rather than production software.
+The result is reported as repository metadata (the `test_suite` field). It is not
+used by the **Engineered Projects** filter.
 """)
 
 st.divider()

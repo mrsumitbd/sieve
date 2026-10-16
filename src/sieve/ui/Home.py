@@ -167,7 +167,7 @@ with st.sidebar:
     engineered_only = st.toggle(
         "Engineered Projects Only", value=False,
         help=(
-            "Apply engineered project filter (Munaiah et al., 2017). "
+            "Apply engineered project filter (Xiao et al., 2025, in the spirit of Reaper by Munaiah et al., 2017). "
             "Excludes non-software licenses, repos without releases, "
             "and bottom-Q1 repos. Slower but higher-quality corpus."
         ),
