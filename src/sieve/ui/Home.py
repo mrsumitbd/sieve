@@ -100,7 +100,7 @@ st.markdown(
 
 st.info(
     "**What can you do with SIEVE?** — "
-    "Source **contamination-free evaluation data** by restricting to repositories "
+    "Source **contamination-aware evaluation data** by restricting to repositories "
     "created after an LLM's training cutoff; extract **dependency graphs** for "
     "supply-chain and library-usage studies; annotate code with an **AI-generation "
     "likelihood score** and full **AST features** for structural analysis of "
@@ -131,10 +131,11 @@ with st.sidebar:
         value=date(2024, 1, 1),
         help=(
             "Only repos created on or after this date are included. "
-            "For contamination-free evaluation, set this to the **release date** "
+            "For contamination-aware evaluation, set this to the **release date** "
             "of the LLM(s) you are studying — data used for both pre-training "
-            "and fine-tuning predates the release, so any repo created after "
-            "the release date is guaranteed unseen by the model."
+            "and fine-tuning predates the release, so repos created after "
+            "the release date postdate both phases. This bounds repository age; "
+            "SIEVE does not verify the origin of individual snippets."
         ),
     )
     end_date = st.date_input(
@@ -166,9 +167,12 @@ with st.sidebar:
     engineered_only = st.toggle(
         "Engineered Projects Only", value=False,
         help=(
-            "Apply engineered project filter (Munaiah et al., 2017). "
+            "Apply engineered project filter (Xiao et al., 2025, in the spirit of Reaper by Munaiah et al., 2017). "
             "Excludes non-software licenses, repos without releases, "
-            "and bottom-Q1 repos. Slower but higher-quality corpus."
+            "and bottom-Q1 repos (pull requests, issues, LOC), and repos whose "
+            "code ratio (LOC / (LOC + comment lines)) falls outside mean ± 2.17 "
+            "standard deviations (a 97% interval) of the candidate pool. "
+            "Slower but higher-quality corpus."
         ),
     )
 

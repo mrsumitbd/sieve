@@ -29,7 +29,7 @@ with st.expander("What is SIEVE?"):
     score (`llm_score`) and full AST features.
 
     Rather than a static, pre-built dataset, SIEVE is a *tool* you run with
-    your own settings to build the corpus a given study needs: **contamination-free
+    your own settings to build the corpus a given study needs: **contamination-aware
     LLM evaluation** (by restricting discovery to repositories created after a
     configurable cutoff date), **dependency-management research**, **structural
     analysis of LLM-generated code**, or general-purpose corpus building for
@@ -55,20 +55,25 @@ with st.expander("What is data contamination and why does it matter?"):
 
     - **For LLM-generated code detection:** A detection classifier shows
       **significant performance degradation** when evaluated on post-cutoff
-      (unseen) data compared to pre-cutoff (potentially seen) data
+      data compared to pre-cutoff (potentially seen) data
       *(Rahman et al., arXiv:2409.01382)*. Contamination in the evaluation set
       produces overly optimistic detection results.
 
-    Reviewers at major SE venues (EMSE, TSE, ICSE, FSE, ASE) now routinely
-    require authors to demonstrate that their evaluation data is contamination-free.
+    Contamination is a growing concern for evaluating LLMs on code, and
+    reviewers increasingly ask authors to address it in their evaluation data.
     """)
 
-with st.expander("How does SIEVE guarantee contamination-free data?"):
+with st.expander("How does SIEVE support contamination-aware evaluation?"):
     st.markdown("""
     SIEVE filters repositories by **creation date** using the GitHub `created:`
     search qualifier. A repository created after an LLM's training cutoff date
-    **cannot have existed** when the model was trained — making every function
-    and class extracted from it contamination-free by construction.
+    did not exist when the model was trained, so every function and class is
+    extracted from a repository that post-dates the cutoff. This makes the corpus
+    temporally bounded relative to the model.
+
+    The filter bounds a repository's **age**. It does not verify where each
+    snippet came from: a new repository can contain code copied or migrated from
+    older sources, and SIEVE does not check for this.
 
     This is stronger than filtering by last push date (`pushed:`), which would
     still include repositories created before the cutoff that were merely updated
@@ -95,41 +100,50 @@ with st.expander("What training cutoff dates should I use?"):
     instruction-following examples, RLHF preference data, and sometimes
     supervised fine-tuning on code. This fine-tuning data postdates the
     pre-training cutoff but predates the release. By setting
-    **Repo Creation Lower Bound** to the release date, you guarantee that
-    the code you collect post-dates both the pre-training and fine-tuning
-    phases of the model.
+    **Repo Creation Lower Bound** to the release date, you restrict
+    the collection to repositories created after both the pre-training and
+    fine-tuning phases of the model.
 
     Using the knowledge cutoff instead of the release date leaves a window
     (sometimes weeks, sometimes months) where fine-tuning data could
     contaminate your evaluation set.
 
-    For release dates and knowledge cutoffs across ~40 models from OpenAI,
+    For release dates and knowledge cutoffs across about 50 entries covering models from OpenAI,
     Anthropic, Google, Meta, Mistral, DeepSeek, Qwen, xAI, and BigCode, see
     the reference table on the **Documentation** page (Contamination-Aware
     Evaluation → How to Choose Your Cutoff Date).
 
     If evaluating multiple models simultaneously, use the **latest** release
-    date among them to guarantee contamination-free data for all.
+    date among them, so that every sampled repository was created after all of
+    the models' training phases.
 
     When submitting papers, you can state:
     > *"Our evaluation corpus was built using SIEVE, collecting only from
-    > repositories created after [DATE] (the release date of [Model]).
-    > By construction, no extracted code could have appeared in the
-    > pre-training or fine-tuning data of any evaluated model."*
+    > repositories created after [DATE] (the release date of [Model]),
+    > so that the sampled repositories post-date the pre-training and
+    > fine-tuning phases of every evaluated model. SIEVE does not verify the
+    > origin of individual snippets."*
     """)
 
-with st.expander("What does 'contamination-free' mean?"):
+with st.expander("What does 'contamination-aware' mean?"):
     st.markdown("""
     A dataset is *contaminated* if its contents appeared in the training data of
     the model being evaluated. This invalidates benchmarks — a model may appear
     to perform well simply because it memorized the answers.
 
-    SIEVE addresses this by:
-    1. **Temporal filtering** — only collecting repositories whose last commit
-       falls after the training cutoff of major LLMs (configurable via Start/End
-       Date).
+    SIEVE supports contamination-aware evaluation by:
+    1. **Temporal filtering** — only collecting repositories whose *creation date*
+       falls after the training cutoff or release date of the LLMs under study
+       (configurable via Start/End Date).
     2. **LLM Score annotation** — scoring each extracted snippet with
        P(AI-generated), so researchers can further filter or stratify by origin.
+
+    **What this does and does not establish:** the creation-date filter shows that
+    a repository is newer than a given date. It does not prove that each snippet
+    in it was first written after that date, because a new repository can contain
+    code copied or migrated from older sources. SIEVE does not verify the origin
+    of individual snippets, so "contamination-aware" means the corpus is
+    temporally bounded, not that it is proven free of contamination.
     """)
 
 with st.expander("What languages does SIEVE support?"):

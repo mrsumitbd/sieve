@@ -12,7 +12,7 @@ pinned: false
 **Software Ingestion & Extraction for Verifiable Evaluation**
 
 [![Coverage](https://codecov.io/gh/mrsumitbd/sieve/graph/badge.svg?token=19aecee5-afb0-4d67-9c0d-bdab723ce8d3)](https://codecov.io/gh/mrsumitbd/sieve)
-![Tests](https://img.shields.io/badge/tests-455%20passed-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-455%20tests-brightgreen?style=flat-square)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![Languages](https://img.shields.io/badge/languages-Python%20%7C%20Java%20%7C%20JavaScript%20%7C%20C%2B%2B-orange?style=flat-square)
@@ -28,7 +28,7 @@ SIEVE is a parameterized GitHub corpus builder for software engineering research
 
 Researchers building code corpora today either write one-off scraping scripts per study or reuse static, pre-built datasets like CodeSearchNet and The Stack — which offer no control over composition and, since they predate most LLMs, have well-known contamination and saturation problems as evaluation data. SIEVE is reusable infrastructure instead: point it at GitHub with the parameters your study needs (language, granularity, repository quality, creation date) and it builds a fresh, richly-annotated corpus on demand.
 
-One direct application is **contamination-free LLM evaluation** — restrict to repositories created after a model's training cutoff, and every extracted snippet is guaranteed unseen by construction. But the same pipeline supports dependency-management research (every record's package manifest is parsed automatically), structural analysis of LLM-generated code (via the built-in AI-generation classifier and AST export), and general-purpose corpus building for any language-specific study.
+One direct application is **contamination-aware LLM evaluation** — restrict to repositories created after a model's training cutoff, so that the corpus is temporally bounded relative to that model. The creation-date filter bounds a repository's age; SIEVE does not verify the origin of individual snippets, and a new repository can contain code copied from older sources. But the same pipeline supports dependency-management research (every record's package manifest is parsed automatically), structural analysis of LLM-generated code (via the built-in AI-generation classifier and AST export), and general-purpose corpus building for any language-specific study.
 
 ---
 
@@ -121,7 +121,7 @@ from sieve.pipeline import run_pipeline
 
 config = SIEVEConfig(
     language="Python",
-    start_date=date(2024, 1, 1),   # repo creation lower bound (e.g. contamination-free)
+    start_date=date(2024, 1, 1),   # repo creation lower bound (e.g. a model's release date)
     end_date=date(2025, 7, 1),     # repo creation upper bound
     min_last_activity=date(2025, 7, 1),  # must have been pushed after this date
     min_stars=50,
@@ -141,7 +141,7 @@ print(summary)
 | Parameter | Type | Description |
 |---|---|---|
 | `language` | str | Target language: `Python`, `Java`, `JavaScript`, `C++` |
-| `start_date` | date | Only include repos **created** on or after this date — e.g. an LLM's training cutoff for contamination-free code, or any reference date to bound a corpus to a development era |
+| `start_date` | date | Only include repos **created** on or after this date — e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era |
 | `end_date` | date | Only include repos **created** on or before this date (default: first of last month) |
 | `min_last_activity` | date | Only include repos pushed on or after this date — ensures active repos (default: same as `end_date`) |
 | `min_stars` | int | Minimum GitHub stars |
@@ -150,7 +150,7 @@ print(summary)
 | `max_functions` | int \| None | Cap on extracted functions (stratified by repo) |
 | `max_classes` | int \| None | Cap on extracted classes (stratified by repo) |
 | `granularity` | list | `function`, `class`, or both |
-| `engineered_only` | bool | Apply Munaiah et al. (2017) engineered project filter |
+| `engineered_only` | bool | Apply engineered project filter (Xiao et al., 2025; in the spirit of Reaper, Munaiah et al., 2017) |
 | `annotate_llm_score` | bool | Score each record with P(AI-generated) via CodeBERT classifier |
 | `export_ast` | bool | Add AST features to every record |
 | `deduplicate` | bool | Apply MinHash near-duplicate removal |
@@ -243,7 +243,7 @@ Supported manifest formats:
 
 ## Code Metrics
 
-SIEVE computes 23 structural metrics for every extracted record using tree-sitter — no external tools required, consistent across all four languages:
+SIEVE computes 22 structural metrics for every extracted record using tree-sitter — no external tools required, consistent across all four languages:
 
 | Category | Metrics |
 |---|---|
@@ -262,7 +262,7 @@ pytest
 pytest --cov=sieve --cov-report=term-missing
 ```
 
-The suite covers 361 tests across unit, integration, and end-to-end levels. GitHub and git are mocked — no network access required.
+The suite covers 455 tests across unit, integration, and end-to-end levels. GitHub and git are mocked — no network access required.
 
 ---
 

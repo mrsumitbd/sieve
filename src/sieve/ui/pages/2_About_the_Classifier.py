@@ -82,7 +82,7 @@ st.dataframe(df, use_container_width=True, hide_index=True)
 
 st.markdown("""
 **Human code** was collected from GitHub repositories created after January 2024
-using SIEVE itself, ensuring temporal contamination-freedom.
+using SIEVE itself, so that the human corpus is restricted to recently created repositories.
 
 **AI-generated code** was produced by prompting 9 LLMs with function/class
 signatures extracted from the human corpus:

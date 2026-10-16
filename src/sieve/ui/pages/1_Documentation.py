@@ -33,7 +33,7 @@ SIEVE extracts two types of program units:
 
 Both record types include the import statements used within the extracted unit,
 enabling self-contained code snippets for prompting or evaluation. Every record
-is also annotated with 23 structural code metrics, an optional AI-generation
+is also annotated with 22 structural code metrics, an optional AI-generation
 likelihood score, parsed dependency information, and (optionally) full AST
 features — supporting research well beyond any single use case.
 """)
@@ -47,7 +47,7 @@ st.markdown("""
 The same underlying pipeline supports several kinds of SE research, depending
 on which parameters you configure:
 
-- **Contamination-free LLM evaluation.** Filter repositories by *creation date* (not last push date) to guarantee that extracted code post-dates a model's training cutoff — see **Contamination-Aware Evaluation** below for the full rationale and a cutoff-date reference table.
+- **Contamination-aware LLM evaluation.** Filter repositories by *creation date* (not last push date) so that every sampled repository post-dates a model's training cutoff — see **Contamination-Aware Evaluation** below for the full rationale and a cutoff-date reference table.
 - **Dependency-management research.** Every processed repository's package manifest is parsed automatically; the corpus manifest and the **Dependency Graph** panel expose these for supply-chain and library-usage studies.
 - **Structural analysis of LLM-generated code.** Enable **Annotate LLM Score** and **Export AST** to get a P(AI-generated) probability and full parse-tree features on every record — useful for studying how AI-authored and human-authored code differ structurally.
 - **General-purpose corpus building.** The creation-date filter is equally useful for bounding a corpus to a specific development era for longitudinal studies, independent of any LLM — or simply source a fresh, richly-annotated, deduplicated corpus for any language-specific study.
@@ -85,32 +85,35 @@ This is not hypothetical. Research has shown:
    human-written from AI-generated code shows **significant performance degradation**
    when evaluated on post-cutoff data compared to pre-cutoff data
    *(Rahman et al., arXiv:2409.01382)*.
-   Contamination in the evaluation set makes detection appear more accurate than it is
-   — a critical issue given that reviewers now routinely require contamination checks.
+   Contamination in the evaluation set makes detection appear more accurate than it is.
+   This is a growing concern for evaluating LLMs on code, and reviewers increasingly
+   ask authors to address it.
 
 ### How SIEVE Solves This
 
 SIEVE filters repositories by **creation date**, not last push date. A repository
-created after an LLM's training cutoff **cannot have existed** when the model was
-trained — making every function and class extracted from it contamination-free by
-construction.
+created after an LLM's training cutoff did not exist when the model was trained, so
+restricting discovery this way makes the corpus temporally bounded relative to that
+model and removes the most direct source of contamination. This bounds the age of
+the *repository*; SIEVE does not verify the origin of individual snippets, and a
+new repository can still contain code copied or migrated from older sources.
 
 ### How to Choose Your Cutoff Date
 
 **Use the model's public release date, not its knowledge cutoff, when you need
-the strongest guarantee.** These are often confused but are different: the
+the most conservative bound.** These are often confused but are different: the
 knowledge cutoff is the last date of data used for *pre-training*, while the
 release date is when the model became publicly available. Between the two,
 models are typically fine-tuned on additional data (instruction-following
 examples, RLHF preference data, sometimes supervised fine-tuning on code) —
 data that postdates the pre-training cutoff but predates the release. Setting
-**Start Date** to the release date guarantees your corpus postdates both the
-pre-training *and* fine-tuning phases; setting it to the knowledge cutoff only
-guarantees the former.
+**Start Date** to the release date restricts your corpus to repositories created
+after both the pre-training *and* fine-tuning phases; setting it to the knowledge
+cutoff only covers the former.
 
 If studying multiple models simultaneously, use whichever date (cutoff or
-release, per the column you're using) is **latest** among them, to guarantee
-contamination-free data for all.
+release, per the column you're using) is **latest** among them, so that the
+sampled repositories were created after all of the models' training phases.
 
 **Reference table.** Verified against official provider documentation and
 model cards; "—" means the provider has not publicly disclosed a knowledge
@@ -236,20 +239,23 @@ st.subheader("Date Range")
 st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
-| **Start Date** | Only include repos **created** on or after this date — e.g. an LLM's training cutoff for contamination-free code, or any reference date to bound a corpus to a development era for other studies. |
+| **Start Date** | Only include repos **created** on or after this date — e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era for other studies. |
 | **End Date** | Only include repos **created** on or before this date. Default: first of last month. Filters out very new repos with little code. |
 | **Min Last Activity** | Only include repos pushed on or after this date. Must be ≥ End Date. Default: same as End Date. Ensures repos are actively maintained rather than abandoned after creation. |
 
 The GitHub search query uses `created:START..END pushed:>=ACTIVITY`, filtering on
 **repository creation date** — not last push date. This distinction matters
-whenever you need to know when code was actually *written*, not just when a
-repo was last touched: for contamination-aware corpus building, a repo created
-after an LLM's cutoff cannot have existed in its training data; for longitudinal
+whenever you need to know when a repository came into existence, not just when
+it was last touched: for contamination-aware corpus building, a repo created
+after an LLM's cutoff did not exist when it was trained (though SIEVE does not
+check whether individual snippets were copied from older sources); for longitudinal
 studies, the same filter lets you bound a corpus to a specific development era
 regardless of any LLM.
 
-**Guarantee:** If Start Date = Jan 1 2024, every extracted function and class is
-from code that was written after Jan 1 2024.
+**What this establishes:** If Start Date = Jan 1 2024, every extracted function and
+class comes from a repository created on or after Jan 1 2024. SIEVE does not verify
+the origin of individual snippets, so code in a new repository may still have been
+copied or migrated from older sources.
 """)
 
 st.subheader("Repository Filters")
@@ -268,7 +274,7 @@ st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
 | **Granularity** | Choose to extract functions, classes, or both. |
-| **Engineered Projects Only** | Applies the Munaiah et al. (2017) filter — see section below. Includes test suite presence as one of its signals. |
+| **Engineered Projects Only** | Applies the engineered project filter of Xiao et al. (2025), in the spirit of Reaper (Munaiah et al., 2017). See section below. |
 """)
 
 st.subheader("Deduplication")
@@ -474,7 +480,7 @@ st.divider()
 
 st.header("Code Structure Metrics")
 st.markdown("""
-SIEVE computes **23 structural metrics** for every extracted record using its own
+SIEVE computes **22 structural metrics** for every extracted record using its own
 tree-sitter-based metrics engine (`sieve.core.metrics`). All metrics are computed
 from isolated code snippets — no external tools required — and are consistent
 across all four supported languages.
@@ -821,20 +827,19 @@ SIEVE automatically detects whether a repository has a test suite using a
 **four-signal heuristic**. Each signal that fires contributes one point; a
 repo is considered to have a test suite if **≥ 2 signals** fire.
 
-| Signal | Examples |
+| Signal | What SIEVE checks |
 |---|---|
-| **Test directory** | `test/`, `tests/`, `__tests__/`, `spec/`, `specs/` at any depth |
-| **Test file naming** | `test_*.py`, `*_test.py`, `*_test.cpp`, `*.test.js`, `*.spec.ts`, `Test*.java` |
-| **Test runner config** | `pytest.ini`, `setup.cfg` with `[tool:pytest]`, `jest.config.js`, `karma.conf.js`, `pom.xml` with Surefire, `CMakeLists.txt` with `enable_testing()` |
-| **CI workflow** | `.github/workflows/*.yml` or `.circleci/config.yml` containing `pytest`, `jest`, `mvn test`, `ctest`, `cargo test`, or similar keywords |
+| **Test directory** | A directory at any depth whose name (case-insensitive) is e.g. `test`, `tests`, `__tests__`, `spec`, `specs`, `testing`, `e2e` or `unit_tests`. Hidden directories other than `.github`, and `node_modules`, `__pycache__`, `venv` and `env`, are not searched. |
+| **Test file naming** | Patterns for the selected language. Python: `test_*.py`, `*_test.py`. Java: `*Test.java`, `*Tests.java`, `*TestCase.java`, `*IT.java`. JavaScript: `*.test.js`, `*.spec.js`, `*.test.ts`, `*.spec.ts`. C++: `test_*`, `*_test`, `*Test` or `*test`, and `*Spec` or `*spec`, with a `.cpp`, `.cc` or `.cxx` extension. |
+| **Test runner config** | Config files for the selected language. Python: `pytest.ini`, `.pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`. Java: `pom.xml`, `build.gradle`, `build.gradle.kts`. JavaScript: e.g. `jest.config.js`, `karma.conf.js`, `.mocharc.js`. C++: e.g. `CMakeLists.txt`, `Makefile`, `meson.build`. For `pyproject.toml`, `setup.cfg`, `pom.xml` and `build.gradle`, the file counts only if its text contains `pytest`, `unittest`, `testng`, `junit` or `jest` (substring match). Every other listed file counts by presence alone, so a `CMakeLists.txt` or `Makefile` triggers this signal even if it defines no tests. |
+| **CI workflow** | `.yml` or `.yaml` files under `.github` whose text (case-insensitive) contains a test-runner keyword, e.g. `pytest`, `unittest`, `jest`, `mocha`, `mvn test`, `gradle test`, `npm test`, `ctest`, `gtest` or `run tests`. The keyword list is the same for all languages. Other CI systems, such as `.circleci`, are not scanned. |
 
 The two-signal threshold avoids false positives from repos that have a single
 test file but no real test infrastructure, while still catching repos that use
 non-standard directory layouts.
 
-Test suite presence is also one of the signals used by the **Engineered Projects**
-filter (Munaiah et al., 2017) — repos without any test infrastructure are more
-likely to be personal or experimental projects rather than production software.
+The result is reported as repository metadata (the `test_suite` field). It is not
+used by the **Engineered Projects** filter.
 """)
 
 st.divider()
