@@ -33,7 +33,7 @@ SIEVE extracts two types of program units:
 
 Both record types include the import statements used within the extracted unit,
 enabling self-contained code snippets for prompting or evaluation. Every record
-is also annotated with 23 structural code metrics, an optional AI-generation
+is also annotated with 22 structural code metrics, an optional AI-generation
 likelihood score, parsed dependency information, and (optionally) full AST
 features — supporting research well beyond any single use case.
 """)
@@ -479,7 +479,7 @@ st.divider()
 
 st.header("Code Structure Metrics")
 st.markdown("""
-SIEVE computes **23 structural metrics** for every extracted record using its own
+SIEVE computes **22 structural metrics** for every extracted record using its own
 tree-sitter-based metrics engine (`sieve.core.metrics`). All metrics are computed
 from isolated code snippets — no external tools required — and are consistent
 across all four supported languages.

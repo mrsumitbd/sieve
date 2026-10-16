@@ -243,7 +243,7 @@ Supported manifest formats:
 
 ## Code Metrics
 
-SIEVE computes 23 structural metrics for every extracted record using tree-sitter — no external tools required, consistent across all four languages:
+SIEVE computes 22 structural metrics for every extracted record using tree-sitter — no external tools required, consistent across all four languages:
 
 | Category | Metrics |
 |---|---|
