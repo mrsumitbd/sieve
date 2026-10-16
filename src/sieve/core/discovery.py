@@ -90,9 +90,11 @@ def discover_repos(
     Args:
         language:         Programming language (e.g. "Python")
         start_date:       Only include repos created on or after this date.
-                          E.g. an LLM's release date for contamination-free
-                          data, or any reference date to bound a corpus to
-                          a development era.
+                          E.g. an LLM's release date for contamination-aware
+                          evaluation, or any reference date to bound a corpus
+                          to a development era. This bounds repository age
+                          only; it does not verify where individual snippets
+                          came from.
         end_date:         Only include repos created on or before this date.
         min_stars:        Minimum star count
         min_contributors: Minimum unique contributor count

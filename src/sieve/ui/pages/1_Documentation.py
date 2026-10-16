@@ -47,7 +47,7 @@ st.markdown("""
 The same underlying pipeline supports several kinds of SE research, depending
 on which parameters you configure:
 
-- **Contamination-free LLM evaluation.** Filter repositories by *creation date* (not last push date) to guarantee that extracted code post-dates a model's training cutoff — see **Contamination-Aware Evaluation** below for the full rationale and a cutoff-date reference table.
+- **Contamination-aware LLM evaluation.** Filter repositories by *creation date* (not last push date) so that every sampled repository post-dates a model's training cutoff — see **Contamination-Aware Evaluation** below for the full rationale and a cutoff-date reference table.
 - **Dependency-management research.** Every processed repository's package manifest is parsed automatically; the corpus manifest and the **Dependency Graph** panel expose these for supply-chain and library-usage studies.
 - **Structural analysis of LLM-generated code.** Enable **Annotate LLM Score** and **Export AST** to get a P(AI-generated) probability and full parse-tree features on every record — useful for studying how AI-authored and human-authored code differ structurally.
 - **General-purpose corpus building.** The creation-date filter is equally useful for bounding a corpus to a specific development era for longitudinal studies, independent of any LLM — or simply source a fresh, richly-annotated, deduplicated corpus for any language-specific study.
@@ -91,26 +91,28 @@ This is not hypothetical. Research has shown:
 ### How SIEVE Solves This
 
 SIEVE filters repositories by **creation date**, not last push date. A repository
-created after an LLM's training cutoff **cannot have existed** when the model was
-trained — making every function and class extracted from it contamination-free by
-construction.
+created after an LLM's training cutoff did not exist when the model was trained, so
+restricting discovery this way makes the corpus temporally bounded relative to that
+model and removes the most direct source of contamination. This bounds the age of
+the *repository*; SIEVE does not verify the origin of individual snippets, and a
+new repository can still contain code copied or migrated from older sources.
 
 ### How to Choose Your Cutoff Date
 
 **Use the model's public release date, not its knowledge cutoff, when you need
-the strongest guarantee.** These are often confused but are different: the
+the most conservative bound.** These are often confused but are different: the
 knowledge cutoff is the last date of data used for *pre-training*, while the
 release date is when the model became publicly available. Between the two,
 models are typically fine-tuned on additional data (instruction-following
 examples, RLHF preference data, sometimes supervised fine-tuning on code) —
 data that postdates the pre-training cutoff but predates the release. Setting
-**Start Date** to the release date guarantees your corpus postdates both the
-pre-training *and* fine-tuning phases; setting it to the knowledge cutoff only
-guarantees the former.
+**Start Date** to the release date restricts your corpus to repositories created
+after both the pre-training *and* fine-tuning phases; setting it to the knowledge
+cutoff only covers the former.
 
 If studying multiple models simultaneously, use whichever date (cutoff or
-release, per the column you're using) is **latest** among them, to guarantee
-contamination-free data for all.
+release, per the column you're using) is **latest** among them, so that the
+sampled repositories were created after all of the models' training phases.
 
 **Reference table.** Verified against official provider documentation and
 model cards; "—" means the provider has not publicly disclosed a knowledge
@@ -236,20 +238,23 @@ st.subheader("Date Range")
 st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
-| **Start Date** | Only include repos **created** on or after this date — e.g. an LLM's training cutoff for contamination-free code, or any reference date to bound a corpus to a development era for other studies. |
+| **Start Date** | Only include repos **created** on or after this date — e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era for other studies. |
 | **End Date** | Only include repos **created** on or before this date. Default: first of last month. Filters out very new repos with little code. |
 | **Min Last Activity** | Only include repos pushed on or after this date. Must be ≥ End Date. Default: same as End Date. Ensures repos are actively maintained rather than abandoned after creation. |
 
 The GitHub search query uses `created:START..END pushed:>=ACTIVITY`, filtering on
 **repository creation date** — not last push date. This distinction matters
-whenever you need to know when code was actually *written*, not just when a
-repo was last touched: for contamination-aware corpus building, a repo created
-after an LLM's cutoff cannot have existed in its training data; for longitudinal
+whenever you need to know when a repository came into existence, not just when
+it was last touched: for contamination-aware corpus building, a repo created
+after an LLM's cutoff did not exist when it was trained (though SIEVE does not
+check whether individual snippets were copied from older sources); for longitudinal
 studies, the same filter lets you bound a corpus to a specific development era
 regardless of any LLM.
 
-**Guarantee:** If Start Date = Jan 1 2024, every extracted function and class is
-from code that was written after Jan 1 2024.
+**What this establishes:** If Start Date = Jan 1 2024, every extracted function and
+class comes from a repository created on or after Jan 1 2024. SIEVE does not verify
+the origin of individual snippets, so code in a new repository may still have been
+copied or migrated from older sources.
 """)
 
 st.subheader("Repository Filters")
