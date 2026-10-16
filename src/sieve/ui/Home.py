@@ -169,7 +169,10 @@ with st.sidebar:
         help=(
             "Apply engineered project filter (Xiao et al., 2025, in the spirit of Reaper by Munaiah et al., 2017). "
             "Excludes non-software licenses, repos without releases, "
-            "and bottom-Q1 repos. Slower but higher-quality corpus."
+            "and bottom-Q1 repos (pull requests, issues, LOC), and repos whose "
+            "code ratio (LOC / (LOC + comment lines)) falls outside mean ± 2.17 "
+            "standard deviations (a 97% interval) of the candidate pool. "
+            "Slower but higher-quality corpus."
         ),
     )
 
