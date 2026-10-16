@@ -85,8 +85,9 @@ This is not hypothetical. Research has shown:
    human-written from AI-generated code shows **significant performance degradation**
    when evaluated on post-cutoff data compared to pre-cutoff data
    *(Rahman et al., arXiv:2409.01382)*.
-   Contamination in the evaluation set makes detection appear more accurate than it is
-   — a critical issue given that reviewers now routinely require contamination checks.
+   Contamination in the evaluation set makes detection appear more accurate than it is.
+   This is a growing concern for evaluating LLMs on code, and reviewers increasingly
+   ask authors to address it.
 
 ### How SIEVE Solves This
 
@@ -826,12 +827,12 @@ SIEVE automatically detects whether a repository has a test suite using a
 **four-signal heuristic**. Each signal that fires contributes one point; a
 repo is considered to have a test suite if **≥ 2 signals** fire.
 
-| Signal | Examples |
+| Signal | What SIEVE checks |
 |---|---|
-| **Test directory** | `test/`, `tests/`, `__tests__/`, `spec/`, `specs/` at any depth |
-| **Test file naming** | `test_*.py`, `*_test.py`, `*_test.cpp`, `*.test.js`, `*.spec.ts`, `Test*.java` |
-| **Test runner config** | `pytest.ini`, `setup.cfg` with `[tool:pytest]`, `jest.config.js`, `karma.conf.js`, `pom.xml` with Surefire, `CMakeLists.txt` with `enable_testing()` |
-| **CI workflow** | `.github/workflows/*.yml` or `.circleci/config.yml` containing `pytest`, `jest`, `mvn test`, `ctest`, `cargo test`, or similar keywords |
+| **Test directory** | A directory at any depth whose name (case-insensitive) is e.g. `test`, `tests`, `__tests__`, `spec`, `specs`, `testing`, `e2e` or `unit_tests`. Hidden directories other than `.github`, and `node_modules`, `__pycache__`, `venv` and `env`, are not searched. |
+| **Test file naming** | Patterns for the selected language. Python: `test_*.py`, `*_test.py`. Java: `*Test.java`, `*Tests.java`, `*TestCase.java`, `*IT.java`. JavaScript: `*.test.js`, `*.spec.js`, `*.test.ts`, `*.spec.ts`. C++: `test_*`, `*_test`, `*Test` or `*test`, and `*Spec` or `*spec`, with a `.cpp`, `.cc` or `.cxx` extension. |
+| **Test runner config** | Config files for the selected language. Python: `pytest.ini`, `.pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`. Java: `pom.xml`, `build.gradle`, `build.gradle.kts`. JavaScript: e.g. `jest.config.js`, `karma.conf.js`, `.mocharc.js`. C++: e.g. `CMakeLists.txt`, `Makefile`, `meson.build`. For `pyproject.toml`, `setup.cfg`, `pom.xml` and `build.gradle`, the file counts only if its text contains `pytest`, `unittest`, `testng`, `junit` or `jest` (substring match). Every other listed file counts by presence alone, so a `CMakeLists.txt` or `Makefile` triggers this signal even if it defines no tests. |
+| **CI workflow** | `.yml` or `.yaml` files under `.github` whose text (case-insensitive) contains a test-runner keyword, e.g. `pytest`, `unittest`, `jest`, `mocha`, `mvn test`, `gradle test`, `npm test`, `ctest`, `gtest` or `run tests`. The keyword list is the same for all languages. Other CI systems, such as `.circleci`, are not scanned. |
 
 The two-signal threshold avoids false positives from repos that have a single
 test file but no real test infrastructure, while still catching repos that use

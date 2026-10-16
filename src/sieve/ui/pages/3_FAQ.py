@@ -59,8 +59,8 @@ with st.expander("What is data contamination and why does it matter?"):
       *(Rahman et al., arXiv:2409.01382)*. Contamination in the evaluation set
       produces overly optimistic detection results.
 
-    Reviewers at major SE venues (EMSE, TSE, ICSE, FSE, ASE) now routinely
-    require authors to account for contamination in their evaluation data.
+    Contamination is a growing concern for evaluating LLMs on code, and
+    reviewers increasingly ask authors to address it in their evaluation data.
     """)
 
 with st.expander("How does SIEVE support contamination-aware evaluation?"):
@@ -108,7 +108,7 @@ with st.expander("What training cutoff dates should I use?"):
     (sometimes weeks, sometimes months) where fine-tuning data could
     contaminate your evaluation set.
 
-    For release dates and knowledge cutoffs across ~40 models from OpenAI,
+    For release dates and knowledge cutoffs across about 50 entries covering models from OpenAI,
     Anthropic, Google, Meta, Mistral, DeepSeek, Qwen, xAI, and BigCode, see
     the reference table on the **Documentation** page (Contamination-Aware
     Evaluation → How to Choose Your Cutoff Date).
