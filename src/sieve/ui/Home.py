@@ -179,8 +179,8 @@ with st.sidebar:
 
     if engineered_only and not check_cloc():
         st.warning(
-            "**cloc not found.** SIEVE will fall back to an AST-based LOC "
-            "counter. For best results, install cloc before running with this filter.",
+            "**cloc not found.** SIEVE will use its built-in AST-based line "
+            "counter instead. Installing cloc is optional.",
             icon="⚠️",
         )
     annotate_llm_score = st.toggle(

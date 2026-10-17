@@ -339,7 +339,7 @@ software projects use it.
 **Stage 2 — Hard thresholds.** Repos with zero releases or fewer than 2 contributors
 are excluded unconditionally.
 
-**Stage 3: Population-level Q1 filter.** Across the discovered candidates that pass
+**Stage 3 — Population-level Q1 filter.** Across the discovered candidates that pass
 Stages 1 and 2, SIEVE computes the first quartile (Q1) for pull request count and issue
 count. Repos falling below Q1 on either are excluded. The LOC and code-ratio criteria are
 implemented in SIEVE's quality module but are not applied by the pipeline, because
