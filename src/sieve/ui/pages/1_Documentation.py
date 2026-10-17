@@ -240,7 +240,7 @@ st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
 | **Start Date** | Only include repos **created** on or after this date — e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era for other studies. |
-| **End Date** | Only include repos **created** on or before this date. Default: first of last month. Filters out very new repos with little code. |
+| **End Date** | Only include repos **created** on or before this date. Default: 30 days before today. Filters out very new repos with little code. |
 | **Min Last Activity** | Only include repos pushed on or after this date. Must be ≥ End Date. Default: same as End Date. Ensures repos are actively maintained rather than abandoned after creation. |
 
 The GitHub search query uses `created:START..END pushed:>=ACTIVITY`, filtering on
