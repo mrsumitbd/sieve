@@ -38,7 +38,7 @@ One direct application is **contamination-aware LLM evaluation** — restrict to
 
 **Python 3.11+** is required. Check your version with `python --version`.
 
-**cloc** (Count Lines of Code) is recommended. SIEVE uses it for accurate LOC and comment line counting when the Engineered Projects filter is enabled. Without it, SIEVE falls back to an AST-based counter.
+**cloc** (Count Lines of Code) is optional. The current pipeline does not need it, because the engineered filter does not count lines of code. Install commands are listed below for completeness.
 
 | Platform | Command |
 |---|---|
@@ -169,7 +169,7 @@ Notes:
 
 - `--config` takes precedence over individual flags: when it is given, the JSON file is the only source of settings and every other flag is ignored. Fields missing from the file take the API/config defaults above (for example `deduplicate` is False). This includes the token, so with `--config` set `github_token` in the file.
 - The GitHub token is read from `--github-token` or the `GITHUB_TOKEN` environment variable in the CLI (without `--config`), from the `github_token` field in the API, and only from the text box in the web UI (no environment fallback). Without a token GitHub allows 60 requests per hour.
-- When `engineered_only` is on, the effective contributor threshold is `max(min_contributors, 2)`: discovery applies `min_contributors`, and the engineered filter additionally excludes repos with fewer than 2 contributors, repos with no releases, and repos with no license or an excluded license. The Q1 (25th percentile) thresholds for pull requests, issues, and LOC are computed over the candidates that pass those checks within the discovered pool (after `min_stars`, `min_contributors`, and `max_repos` have been applied), not over all of GitHub. The pipeline collects these metrics without cloning, so LOC is currently 0 for every candidate at this stage; in practice the LOC quartile and code-ratio checks do not exclude any repo.
+- When `engineered_only` is on, the filter applies a license check (repos with no license or an excluded license are dropped), a no-release exclusion, a minimum of 2 contributors, and bottom-Q1 exclusion on pull-request count and issue count. The effective contributor threshold is `max(min_contributors, 2)`, because discovery applies `min_contributors` first. The Q1 (25th percentile) thresholds are computed over the candidates that pass the license, release, and contributor checks within the discovered pool (after `min_stars`, `min_contributors`, and `max_repos` have been applied), not over all of GitHub. The LOC and code-ratio criteria are implemented in `core/quality.py` but are not applied by the pipeline, because filtering runs before repositories are cloned.
 
 ---
 
