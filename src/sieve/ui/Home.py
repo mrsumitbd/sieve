@@ -168,18 +168,19 @@ with st.sidebar:
         "Engineered Projects Only", value=False,
         help=(
             "Apply engineered project filter (Xiao et al., 2025, in the spirit of Reaper by Munaiah et al., 2017). "
-            "Excludes non-software licenses, repos without releases, "
-            "and bottom-Q1 repos (pull requests, issues, LOC), and repos whose "
-            "code ratio (LOC / (LOC + comment lines)) falls outside mean ± 2.17 "
-            "standard deviations (a 97% interval) of the candidate pool. "
+            "Excludes repos with no license or a non-software license, repos without releases, "
+            "repos with fewer than 2 contributors, and repos in the bottom quartile (Q1) of "
+            "the candidate pool for pull request count or issue count. "
+            "LOC and code-ratio criteria are not applied, because filtering runs before "
+            "repositories are cloned. "
             "Slower but higher-quality corpus."
         ),
     )
 
     if engineered_only and not check_cloc():
         st.warning(
-            "**cloc not found.** SIEVE will fall back to an AST-based LOC "
-            "counter. For best results, install cloc before running with this filter.",
+            "**cloc not found.** SIEVE will use its built-in AST-based line "
+            "counter instead. Installing cloc is optional.",
             icon="⚠️",
         )
     annotate_llm_score = st.toggle(

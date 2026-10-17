@@ -38,7 +38,7 @@ One direct application is **contamination-aware LLM evaluation** — restrict to
 
 **Python 3.11+** is required. Check your version with `python --version`.
 
-**cloc** (Count Lines of Code) is recommended. SIEVE uses it for accurate LOC and comment line counting when the Engineered Projects filter is enabled. Without it, SIEVE falls back to an AST-based counter.
+**cloc** (Count Lines of Code) is optional. The current pipeline does not need it, because the engineered filter does not count lines of code. Install commands are listed below for completeness.
 
 | Platform | Command |
 |---|---|
@@ -85,7 +85,7 @@ pip install -e .
 ```bash
 cp .env.example .env
 ```
-Open `.env` and replace `your_github_pat_here` with your GitHub Personal Access Token. Generate one at [github.com/settings/tokens](https://github.com/settings/tokens) — only the `public_repo` scope is needed.
+Open `.env` and add the line `GITHUB_TOKEN=<your GitHub Personal Access Token>`. Generate one at [github.com/settings/tokens](https://github.com/settings/tokens); only the `public_repo` scope is needed. The CLI reads this file. The web UI does not, so paste the token into the sidebar there.
 
 ---
 
@@ -121,13 +121,17 @@ from sieve.pipeline import run_pipeline
 
 config = SIEVEConfig(
     language="Python",
-    start_date=date(2024, 1, 1),   # repo creation lower bound (e.g. a model's release date)
-    end_date=date(2025, 7, 1),     # repo creation upper bound
-    min_last_activity=date(2025, 7, 1),  # must have been pushed after this date
+    start_date=date(2024, 6, 1),   # repo creation lower bound (e.g. a model's release date)
+    end_date=date(2025, 6, 1),     # repo creation upper bound
     min_stars=50,
     min_contributors=5,
+    max_repos=20,
+    max_functions=30,
+    max_classes=30,
+    engineered_only=True,
+    annotate_llm_score=True,
     output_dir="./my_corpus",
-    export_format="jsonl",
+    export_format="both",          # "jsonl", "parquet", or "both"
 )
 
 summary = run_pipeline(config)
@@ -138,25 +142,34 @@ print(summary)
 
 ## Parameters
 
-| Parameter | Type | Description |
-|---|---|---|
-| `language` | str | Target language: `Python`, `Java`, `JavaScript`, `C++` |
-| `start_date` | date | Only include repos **created** on or after this date — e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era |
-| `end_date` | date | Only include repos **created** on or before this date (default: first of last month) |
-| `min_last_activity` | date | Only include repos pushed on or after this date — ensures active repos (default: same as `end_date`) |
-| `min_stars` | int | Minimum GitHub stars |
-| `min_contributors` | int | Minimum unique contributors |
-| `max_repos` | int \| None | Cap on repos to process |
-| `max_functions` | int \| None | Cap on extracted functions (stratified by repo) |
-| `max_classes` | int \| None | Cap on extracted classes (stratified by repo) |
-| `granularity` | list | `function`, `class`, or both |
-| `engineered_only` | bool | Apply engineered project filter (Xiao et al., 2025; in the spirit of Reaper, Munaiah et al., 2017) |
-| `annotate_llm_score` | bool | Score each record with P(AI-generated) via CodeBERT classifier |
-| `export_ast` | bool | Add AST features to every record |
-| `deduplicate` | bool | Apply MinHash near-duplicate removal |
-| `dedup_threshold` | float | Jaccard similarity threshold (default 0.8) |
-| `output_dir` | str | Local path for output files |
-| `export_format` | str | `jsonl`, `parquet`, or `both` |
+Defaults differ between interfaces where noted. "CLI/API" means the `sieve run` command and `SIEVEConfig`.
+
+| Option | CLI flag | Type | Default | Description |
+|---|---|---|---|---|
+| `language` | `--language` | str | required in API and CLI; web UI: `Python` | Target language: `Python`, `Java`, `JavaScript`, `C++` |
+| `start_date` | `--start-date` | date (`YYYY-MM-DD` on the CLI) | required in API and CLI (unless `--config`); web UI: 2024-01-01 | Only include repos **created** on or after this date, e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era |
+| `end_date` | `--end-date` | date (`YYYY-MM-DD` on the CLI) | required in API/config; CLI: 30 days before today if omitted; web UI: 30 days before today (rolling, editable) | Only include repos **created** on or before this date. Must be on or after `start_date` |
+| `min_stars` | `--min-stars` | int | CLI/API: 10; web UI: 50 | Minimum GitHub stars |
+| `min_contributors` | `--min-contributors` | int (at least 1) | CLI/API: 1; web UI: 5 | Minimum unique contributors |
+| `max_repos` | `--max-repos` | int \| None | CLI/API: None (no cap); web UI: 100 | Cap on repos to process, applied during discovery (repos are taken in descending star order). In the CLI/API leave it unset for no cap, because 0 yields no repos. In the web UI, 0 means no cap |
+| `max_functions` | `--max-functions` | int \| None | CLI/API: None (no cap); web UI: 0 (no cap) | Cap on total extracted functions (stratified by repo). In the CLI/API leave it unset for no cap, because 0 extracts no functions, and do not pass -1 (use `granularity` to skip a level). In the web UI, 0 means no cap and -1 skips function extraction |
+| `max_classes` | `--max-classes` | int \| None | CLI/API: None (no cap); web UI: 0 (no cap) | Cap on total extracted classes (stratified by repo). Same rules as `max_functions`; in the web UI, -1 skips class extraction |
+| `granularity` | config file / API only | list | `["function", "class"]` | `function`, `class`, or both. The CLI always extracts both; the web UI derives it from the -1 values of `max_functions` and `max_classes` |
+| `engineered_only` | `--engineered-only` / `--no-engineered-only` | bool | False | Apply engineered project filter (Xiao et al., 2025; in the spirit of Reaper, Munaiah et al., 2017). See the notes below |
+| `annotate_llm_score` | config file / API only | bool | False | Score each record with P(AI-generated) via CodeBERT classifier. The classifier weights are downloaded from HuggingFace Hub on first use. Also available as a web UI toggle |
+| `export_ast` | config file / API only | bool | False | Include the full AST as nested JSON in every record (increases file size significantly). The summary fields `ast_depth`, `ast_num_nodes`, and `ast_node_types` are always present. In the web UI this is the "Include Full AST in Export" toggle |
+| `deduplicate` | `--deduplicate` / `--no-deduplicate` | bool | CLI: True; API/config: False; web UI: off | Apply MinHash near-duplicate removal |
+| `dedup_threshold` | `--dedup-threshold` | float (0 to 1) | 0.8 | Jaccard similarity threshold for deduplication (web UI slider: 0.5 to 1.0) |
+| `output_dir` | `--output-dir` | str | `./sieve_output` | Local path for output files. The web UI writes to a temporary directory and offers downloads instead |
+| `export_format` | `--export-format` | str | `jsonl` | `jsonl`, `parquet`, or `both` |
+| `github_token` | `--github-token` | str | None | GitHub Personal Access Token for higher rate limits |
+| `hf_token` | config file / API only | str | None | HuggingFace token for downloading classifier weights (only used with `annotate_llm_score`) |
+
+Notes:
+
+- `--config` takes precedence over individual flags: when it is given, the JSON file is the only source of settings and every other flag is ignored. Fields missing from the file take the API/config defaults above (for example `deduplicate` is False). This includes the token, so with `--config` set `github_token` in the file.
+- The GitHub token is read from `--github-token` or the `GITHUB_TOKEN` environment variable in the CLI (without `--config`), from the `github_token` field in the API, and only from the text box in the web UI (no environment fallback). Without a token GitHub allows 60 requests per hour.
+- When `engineered_only` is on, the filter applies a license check (repos with no license or an excluded license are dropped), a no-release exclusion, a minimum of 2 contributors, and bottom-Q1 exclusion on pull-request count and issue count. The effective contributor threshold is `max(min_contributors, 2)`, because discovery applies `min_contributors` first. The Q1 (25th percentile) thresholds are computed over the candidates that pass the license, release, and contributor checks within the discovered pool (after `min_stars`, `min_contributors`, and `max_repos` have been applied), not over all of GitHub. The LOC and code-ratio criteria are implemented in `core/quality.py` but are not applied by the pipeline, because filtering runs before repositories are cloned.
 
 ---
 

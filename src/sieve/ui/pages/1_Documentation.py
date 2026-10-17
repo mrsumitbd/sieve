@@ -240,11 +240,11 @@ st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
 | **Start Date** | Only include repos **created** on or after this date — e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era for other studies. |
-| **End Date** | Only include repos **created** on or before this date. Default: first of last month. Filters out very new repos with little code. |
-| **Min Last Activity** | Only include repos pushed on or after this date. Must be ≥ End Date. Default: same as End Date. Ensures repos are actively maintained rather than abandoned after creation. |
+| **End Date** | Only include repos **created** on or before this date. Default: 30 days before today. Filters out very new repos with little code. |
 
-The GitHub search query uses `created:START..END pushed:>=ACTIVITY`, filtering on
-**repository creation date** — not last push date. This distinction matters
+The GitHub search query combines `created:START..END` with `stars:>=MIN_STARS`,
+`fork:false`, and `archived:false`, and sorts results by stars in descending order.
+It filters on **repository creation date**, not last push date. This distinction matters
 whenever you need to know when a repository came into existence, not just when
 it was last touched: for contamination-aware corpus building, a repo created
 after an LLM's cutoff did not exist when it was trained (though SIEVE does not
@@ -339,9 +339,11 @@ software projects use it.
 **Stage 2 — Hard thresholds.** Repos with zero releases or fewer than 2 contributors
 are excluded unconditionally.
 
-**Stage 3 — Population-level Q1 filter.** Across all discovered repos, SIEVE computes
-the first quartile (Q1) for pull request count, issue count, and LOC, plus a 97% confidence
-interval on code ratio. Repos falling below Q1 on any dimension are excluded.
+**Stage 3 — Population-level Q1 filter.** Across the discovered candidates that pass
+Stages 1 and 2, SIEVE computes the first quartile (Q1) for pull request count and issue
+count. Repos falling below Q1 on either are excluded. The LOC and code-ratio criteria are
+implemented in SIEVE's quality module but are not applied by the pipeline, because
+filtering runs before repositories are cloned.
 
 This filter is the most reliable way to avoid documentation repos, "awesome lists", dataset
 repos, and other non-software projects that can otherwise dominate high-star searches.
@@ -607,7 +609,7 @@ with st.expander("Why do some repos yield 0 functions and 0 classes?"):
     but often have no `.py` files with extractable function or class definitions.
 
     **How to avoid this:** Enable the **Engineered Projects Only** filter, which uses
-    license type, release count, contributor count, pull request activity, and code ratio
+    license type, release count, contributor count, and pull request and issue activity
     to exclude non-software repos before cloning. This is the most robust solution but adds
     processing time. A lighter alternative is to inspect the Dataset Statistics panel after
     a run and adjust your filters accordingly.
