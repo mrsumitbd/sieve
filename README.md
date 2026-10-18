@@ -26,9 +26,9 @@ SIEVE is a parameterized GitHub corpus builder for software engineering research
 
 ## Why SIEVE?
 
-Researchers building code corpora today either write one-off scraping scripts per study or reuse static, pre-built datasets like CodeSearchNet and The Stack — which offer no control over composition and, since they predate most LLMs, have well-known contamination and saturation problems as evaluation data. SIEVE is reusable infrastructure instead: point it at GitHub with the parameters your study needs (language, granularity, repository quality, creation date) and it builds a fresh, richly-annotated corpus on demand.
+Researchers building code corpora today either write one-off scraping scripts per study or reuse static, pre-built datasets like CodeSearchNet and The Stack, which offer no control over composition and can overlap with the training data of the LLMs being evaluated. SIEVE is reusable infrastructure instead: point it at GitHub with the parameters your study needs (language, granularity, repository quality, creation date) and it builds a richly-annotated corpus on demand, with the creation-date window under your control.
 
-One direct application is **contamination-aware LLM evaluation** — restrict to repositories created after a model's training cutoff, so that the corpus is temporally bounded relative to that model. The creation-date filter bounds a repository's age; SIEVE does not verify the origin of individual snippets, and a new repository can contain code copied from older sources. But the same pipeline supports dependency-management research (every record's package manifest is parsed automatically), structural analysis of LLM-generated code (via the built-in AI-generation classifier and AST export), and general-purpose corpus building for any language-specific study.
+One application is **contamination-aware LLM evaluation**: restricting discovery to repositories created after a chosen date (for example, a model's release date) makes the corpus temporally bounded relative to that model. This bounds repository age only. SIEVE does not verify the origin of individual snippets, and a new repository can contain code copied from older sources, so this reduces, but does not rule out, overlap with training data. The same pipeline also supports dependency-management research (every record's package manifest is parsed automatically), structural analysis of LLM-generated code (via the built-in AI-generation classifier and AST export), and general-purpose corpus building for any language-specific study.
 
 ---
 
@@ -147,7 +147,7 @@ Defaults differ between interfaces where noted. "CLI/API" means the `sieve run` 
 | Option | CLI flag | Type | Default | Description |
 |---|---|---|---|---|
 | `language` | `--language` | str | required in API and CLI; web UI: `Python` | Target language: `Python`, `Java`, `JavaScript`, `C++` |
-| `start_date` | `--start-date` | date (`YYYY-MM-DD` on the CLI) | required in API and CLI (unless `--config`); web UI: 2024-01-01 | Only include repos **created** on or after this date, e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era |
+| `start_date` | `--start-date` | date (`YYYY-MM-DD` on the CLI) | required in API and CLI (unless `--config`); web UI: 2024-01-01 | Earliest repository creation date (YYYY-MM-DD). Bounds repository age (for example for contamination-aware evaluation); it does not verify snippet origin. |
 | `end_date` | `--end-date` | date (`YYYY-MM-DD` on the CLI) | required in API/config; CLI: 30 days before today if omitted; web UI: 30 days before today (rolling, editable) | Only include repos **created** on or before this date. Must be on or after `start_date` |
 | `min_stars` | `--min-stars` | int | CLI/API: 10; web UI: 50 | Minimum GitHub stars |
 | `min_contributors` | `--min-contributors` | int (at least 1) | CLI/API: 1; web UI: 5 | Minimum unique contributors |

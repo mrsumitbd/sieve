@@ -1,38 +1,36 @@
 # sieve/models/
 
-This directory holds the serialized LLM-generated code classifier.
+`classifier.py` defines `LLMCodeClassifier`, a CodeBERT-based binary classifier
+that returns P(LLM-generated) for a code snippet. It fills the `llm_score`
+field on function and class records.
 
-## Expected artifact
+## Weights
 
-`llm_classifier.joblib` — a trained binary classifier that outputs
-P(LLM-generated) for a given source code snippet.
+- Weights (`best_model.pt`) are hosted on the Hugging Face Hub at
+  `HF_REPO_ID = "mrahman2025/sieve-llm-classifier"`.
+- They are downloaded lazily with `hf_hub_download` on first use and cached by
+  `huggingface_hub`.
+- If `artifacts/best_model.pt` exists locally, it is used instead of downloading.
+  The `artifacts/` weights and tokenizer files are git-ignored.
+- The tokenizer and encoder come from `microsoft/codebert-base`.
 
-## Status
+## Interface
 
-**Not yet built.** The `llm_score` field on every `FunctionRecord` and
-`ClassRecord` will remain `null` until this classifier is trained and
-placed here.
+- `LLMCodeClassifier.load(model_dir=None, hf_token=None)` loads the model.
+- `score_batch(snippets, batch_size=64)` returns one score in [0, 1] per snippet,
+  or `None` for an empty snippet. `score(code)` scores a single snippet.
 
-## Planned approach
+## Pipeline use
 
-- **Training data**: CodeProbe dataset (human-written vs. LLM-generated
-  code, labeled, multi-language)
-- **Features**: 72 interpretable static features from CodeProbe
-  (complexity, naming conventions, comment density, structural patterns)
-- **Architecture**: Gradient-boosted classifier (XGBoost or LightGBM) —
-  fast at inference, no GPU required, interpretable via SHAP
-- **Interface**: `sieve/models/classifier.py` will expose a
-  `LLMCodeClassifier` class with a `.score(source_code: str) -> float`
-  method
+Scoring is Phase 5 of `sieve/pipeline.py` and runs only when
+`annotate_llm_score` is enabled (default `False`). A failure to load or score is
+non-fatal: the error is reported through the progress callback and the run
+continues. `llm_score` is `null` when annotation is off or failed.
 
-## Integration point
+`hf_token` is optional and is set only through the config or API (there is no
+CLI option for it).
 
-Once built, uncomment the following block in `sieve/pipeline.py`
-(Phase 5 — LLM score annotation):
+## Dependencies
 
-```python
-from sieve.models.classifier import LLMCodeClassifier
-clf = LLMCodeClassifier.load("sieve/models/llm_classifier.joblib")
-for record in all_functions + all_classes:
-    record.llm_score = clf.score(record.source_code)
-```
+`torch`, `transformers`, `huggingface_hub` and `sentencepiece` are listed in
+`requirements.txt`, not in the `dependencies` of `pyproject.toml`.

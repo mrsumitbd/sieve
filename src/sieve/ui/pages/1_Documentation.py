@@ -25,7 +25,7 @@ SIEVE is a **parameterized GitHub corpus builder** for software engineering
 research. Rather than a static, pre-built dataset, SIEVE is a *tool* you run
 with your own settings — programming language, granularity (functions/methods
 vs. classes), repository quality, and repository creation date — to build the
-corpus a given study actually needs, sourced fresh from GitHub each time.
+corpus a given study actually needs, built from GitHub on each run.
 
 SIEVE extracts two types of program units:
 - **Functions** — CodeSearchNet-style records with full source, signature, parameters, return type, and docstring.
@@ -47,10 +47,10 @@ st.markdown("""
 The same underlying pipeline supports several kinds of SE research, depending
 on which parameters you configure:
 
-- **Contamination-aware LLM evaluation.** Filter repositories by *creation date* (not last push date) so that every sampled repository post-dates a model's training cutoff — see **Contamination-Aware Evaluation** below for the full rationale and a cutoff-date reference table.
+- **Contamination-aware LLM evaluation.** Filter repositories by *creation date* (not last push date) so that every sampled repository is newer than a chosen date such as a model's release date; see **Contamination-Aware Evaluation** below for the rationale, its limits, and a cutoff-date reference table.
 - **Dependency-management research.** Every processed repository's package manifest is parsed automatically; the corpus manifest and the **Dependency Graph** panel expose these for supply-chain and library-usage studies.
 - **Structural analysis of LLM-generated code.** Enable **Annotate LLM Score** and **Export AST** to get a P(AI-generated) probability and full parse-tree features on every record — useful for studying how AI-authored and human-authored code differ structurally.
-- **General-purpose corpus building.** The creation-date filter is equally useful for bounding a corpus to a specific development era for longitudinal studies, independent of any LLM — or simply source a fresh, richly-annotated, deduplicated corpus for any language-specific study.
+- **General-purpose corpus building.** The creation-date filter is equally useful for bounding a corpus to a specific development era for longitudinal studies, independent of any LLM, or simply source a richly-annotated, deduplicated corpus for any language-specific study.
 """)
 
 st.divider()
@@ -94,7 +94,7 @@ This is not hypothetical. Research has shown:
 SIEVE filters repositories by **creation date**, not last push date. A repository
 created after an LLM's training cutoff did not exist when the model was trained, so
 restricting discovery this way makes the corpus temporally bounded relative to that
-model and removes the most direct source of contamination. This bounds the age of
+model and reduces the most direct route for contamination. This bounds the age of
 the *repository*; SIEVE does not verify the origin of individual snippets, and a
 new repository can still contain code copied or migrated from older sources.
 
@@ -219,12 +219,12 @@ updated, or for a model not listed here.
 
 When submitting papers that use SIEVE-generated corpora, you can state:
 
-> *"Our evaluation corpus was built using SIEVE, collecting only from GitHub
-> repositories created after [DATE] (the release date of [Model]). By
-> construction, no extracted code could have appeared in the pre-training or
-> fine-tuning data of any evaluated model."*
+> *"Our evaluation corpus was built using SIEVE, restricted to GitHub
+> repositories created after [DATE] (the release date of [Model]). This bounds
+> repository age relative to the evaluated models; it does not verify the origin
+> of individual snippets, which we discuss as a limitation."*
 
-This satisfies the contamination check now required by most SE venues.
+Stating the bound and its limits explicitly lets reviewers judge the contamination risk themselves.
 """)
 
 st.divider()

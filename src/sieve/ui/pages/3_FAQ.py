@@ -79,9 +79,10 @@ with st.expander("How does SIEVE support contamination-aware evaluation?"):
     still include repositories created before the cutoff that were merely updated
     after it. Old code in those repos could still be in the training data.
 
-    **How to use it:** Set **Start Date** to the training cutoff of the LLM(s)
-    you are evaluating. All extracted code will be from repositories that
-    post-date that cutoff.
+    **How to use it:** Set **Repo Creation Lower Bound** to the release date of
+    the LLM(s) you are evaluating (see the next entry for why the release date
+    rather than the knowledge cutoff). All extracted code comes from
+    repositories created after that date.
     """)
 
 with st.expander("What training cutoff dates should I use?"):
@@ -118,11 +119,11 @@ with st.expander("What training cutoff dates should I use?"):
     the models' training phases.
 
     When submitting papers, you can state:
-    > *"Our evaluation corpus was built using SIEVE, collecting only from
-    > repositories created after [DATE] (the release date of [Model]),
-    > so that the sampled repositories post-date the pre-training and
-    > fine-tuning phases of every evaluated model. SIEVE does not verify the
-    > origin of individual snippets."*
+    > *"Our evaluation corpus was built using SIEVE, restricted to GitHub
+    > repositories created after [DATE] (the release date of [Model]). This
+    > bounds repository age relative to the evaluated models; it does not
+    > verify the origin of individual snippets, which we discuss as a
+    > limitation."*
     """)
 
 with st.expander("What does 'contamination-aware' mean?"):
