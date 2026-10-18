@@ -100,11 +100,12 @@ st.markdown(
 
 st.info(
     "**What can you do with SIEVE?** — "
-    "Source **contamination-aware evaluation data** by restricting to repositories "
-    "created after an LLM's training cutoff; extract **dependency graphs** for "
+    "Build **temporally bounded corpora for contamination-aware evaluation** by "
+    "restricting to repositories created after a chosen date such as a model's "
+    "release; extract **dependency graphs** for "
     "supply-chain and library-usage studies; annotate code with an **AI-generation "
     "likelihood score** and full **AST features** for structural analysis of "
-    "LLM-generated vs. human-written code; or simply build a fresh, richly-annotated "
+    "LLM-generated vs. human-written code; or simply build a richly-annotated "
     "corpus for any language-specific study. "
     "See the **Documentation** page for the full parameter reference and use-case details.",
     icon="🧰",
