@@ -25,7 +25,7 @@ SIEVE is a **parameterized GitHub corpus builder** for software engineering
 research. Rather than a static, pre-built dataset, SIEVE is a *tool* you run
 with your own settings — programming language, granularity (functions/methods
 vs. classes), repository quality, and repository creation date — to build the
-corpus a given study actually needs, sourced fresh from GitHub each time.
+corpus a given study actually needs, built from GitHub on each run.
 
 SIEVE extracts two types of program units:
 - **Functions** — CodeSearchNet-style records with full source, signature, parameters, return type, and docstring.
