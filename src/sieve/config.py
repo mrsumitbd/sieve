@@ -26,7 +26,7 @@ class SIEVEConfig(BaseModel):
     # --- Core filters ---
     language: Language = Field(..., description="Target programming language")
     start_date: date = Field(..., description="Only include repos created on or after this date — e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era (bounds repo age, not the origin of each snippet)")
-    end_date: date = Field(..., description="Only include repos created on or before this date (default: one month before today)")
+    end_date: date = Field(..., description="Only include repos created on or before this date (the CLI and web UI default to 30 days before today)")
 
     @field_validator("end_date")
     @classmethod
@@ -39,8 +39,8 @@ class SIEVEConfig(BaseModel):
     min_stars: int = Field(default=10, ge=0, description="Minimum number of GitHub stars")
     min_contributors: int = Field(default=1, ge=1, description="Minimum number of unique contributors")
     max_repos: Optional[int] = Field(default=None, description="Cap on number of repos to process. None = no cap")
-    max_functions: Optional[int] = Field(default=None, ge=-1, description="Cap on total functions. None/0 = no cap, -1 = skip function extraction")
-    max_classes: Optional[int] = Field(default=None, ge=-1, description="Cap on total classes. None/0 = no cap, -1 = skip class extraction")
+    max_functions: Optional[int] = Field(default=None, ge=-1, description="Cap on total functions. None = no cap, 0 = extract no functions, -1 = skip function extraction")
+    max_classes: Optional[int] = Field(default=None, ge=-1, description="Cap on total classes. None = no cap, 0 = extract no classes, -1 = skip class extraction")
 
     # --- Content filters ---
     granularity: list[Granularity] = Field(
@@ -59,7 +59,7 @@ class SIEVEConfig(BaseModel):
     # --- LLM-generated code ---
     annotate_llm_score: bool = Field(
         default=False,
-        description="Annotate each record with P(LLM-generated). Requires classifier to be built first."
+        description="Annotate each record with P(LLM-generated). Classifier weights are downloaded from the Hugging Face Hub on first use."
     )
     export_ast: bool = Field(
         default=False,

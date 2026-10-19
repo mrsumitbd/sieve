@@ -73,7 +73,7 @@ outputs/
 # Cloned repos (temporary, cleaned up by pipeline but just in case)
 git_repos_for_analysis/
 
-# Trained classifier artifact (too large for git — use Git LFS or HuggingFace Hub)
+# Trained classifier artifact (too large for git; weights are hosted on HuggingFace Hub)
 src/sieve/models/*.joblib
 src/sieve/models/*.pkl
 src/sieve/models/*.pt

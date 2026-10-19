@@ -48,7 +48,7 @@ def run(
     ),
     language: Optional[str] = typer.Option(None, help="Programming language"),
     start_date: Optional[str] = typer.Option(None, help="Repo creation lower bound (YYYY-MM-DD). E.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era (bounds repo age, not the origin of each snippet)."),
-    end_date: Optional[str] = typer.Option(None, help="Repo creation upper bound (YYYY-MM-DD). Defaults to one month before today."),
+    end_date: Optional[str] = typer.Option(None, help="Repo creation upper bound (YYYY-MM-DD). Defaults to 30 days before today."),
     min_stars: int = typer.Option(10, help="Minimum stars"),
     min_contributors: int = typer.Option(1, help="Minimum contributors"),
     max_repos: Optional[int] = typer.Option(None, help="Max repos to process (default: no cap)"),

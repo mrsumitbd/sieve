@@ -557,6 +557,7 @@ def run_pipeline(
     if config.annotate_llm_score:
         from sieve.models.classifier import LLMCodeClassifier
 
+        # Local weights are used if present here; otherwise they come from the Hub.
         model_dir = Path(__file__).parent / "models" / "artifacts"
 
         try:

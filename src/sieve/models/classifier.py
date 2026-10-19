@@ -54,8 +54,9 @@ class LLMCodeClassifier:
         hf_token: Optional[str] = None,
     ) -> "LLMCodeClassifier":
         """
-        Load classifier. Uses HuggingFace Hub cache by default.
-        Falls back to local artifacts if model_dir is provided and exists.
+        Load classifier. Uses local artifacts if best_model.pt exists in
+        model_dir (default: the bundled artifacts directory); otherwise
+        downloads the weights from HuggingFace Hub (cached after first use).
 
         Args:
             model_dir: Optional local path to model artifacts directory.
@@ -91,7 +92,7 @@ class LLMCodeClassifier:
             token=hf_token,
         )
 
-        # ── Model weights: load from HF Hub cache ─────────────────────────────
+        # ── Model weights: local artifacts first, else HF Hub ─────────────────
         local_weights = self.model_dir / "best_model.pt"
         if local_weights.exists():
             logger.info("Loading weights from local artifacts...")
