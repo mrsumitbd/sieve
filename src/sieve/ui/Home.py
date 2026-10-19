@@ -144,7 +144,7 @@ with st.sidebar:
         value=_default_end,
         help=(
             "Only repos created on or before this date are included. "
-            "Default: one month before today, allowing time for initial "
+            "Default: 30 days before today, allowing time for initial "
             "commits and activity to accumulate in recently created repos."
         ),
     )

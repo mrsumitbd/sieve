@@ -99,7 +99,7 @@ def discover_repos(
         min_stars:        Minimum star count
         min_contributors: Minimum unique contributor count
         max_repos:        If set, stop after yielding this many repos
-        github_token:     GitHub PAT. Without it, rate limit is 10 req/min.
+        github_token:     GitHub PAT. Without a token, GitHub allows 60 REST requests per hour and 10 search requests per minute.
 
     Yields:
         RepoMetadata for each qualifying repo
