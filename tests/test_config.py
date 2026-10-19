@@ -96,3 +96,26 @@ class TestExportFormats:
             export_format=fmt,
         )
         assert cfg.export_format == fmt
+
+class TestExtractionCaps:
+    @pytest.mark.parametrize("field", ["max_functions", "max_classes"])
+    @pytest.mark.parametrize("bad", [-1, -5])
+    def test_negative_cap_raises(self, field, bad):
+        with pytest.raises(ValidationError, match=field):
+            SIEVEConfig(
+                language="Python",
+                start_date=date(2024, 1, 1),
+                end_date=date(2025, 1, 1),
+                **{field: bad},
+            )
+
+    @pytest.mark.parametrize("field", ["max_functions", "max_classes"])
+    @pytest.mark.parametrize("value", [None, 0, 1, 500])
+    def test_valid_cap_accepted(self, field, value):
+        cfg = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            **{field: value},
+        )
+        assert getattr(cfg, field) == value
