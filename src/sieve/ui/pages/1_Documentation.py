@@ -107,7 +107,7 @@ release date is when the model became publicly available. Between the two,
 models are typically fine-tuned on additional data (instruction-following
 examples, RLHF preference data, sometimes supervised fine-tuning on code) —
 data that postdates the pre-training cutoff but predates the release. Setting
-**Start Date** to the release date restricts your corpus to repositories created
+**Repo Creation Lower Bound** to the release date restricts your corpus to repositories created
 after both the pre-training *and* fine-tuning phases; setting it to the knowledge
 cutoff only covers the former.
 
@@ -239,8 +239,8 @@ st.subheader("Date Range")
 st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
-| **Start Date** | Only include repos **created** on or after this date — e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era for other studies. |
-| **End Date** | Only include repos **created** on or before this date. Default: 30 days before today. Filters out very new repos with little code. |
+| **Start Date** | Only include repos **created** on or after this date (web UI field: **Repo Creation Lower Bound**), e.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era for other studies. |
+| **End Date** | Only include repos **created** on or before this date (web UI field: **Repo Creation Upper Bound**). Default: 30 days before today. Filters out very new repos with little code. |
 
 The GitHub search query combines `created:START..END` with `stars:>=MIN_STARS`,
 `fork:false`, and `archived:false`, and sorts results by stars in descending order.
@@ -252,7 +252,7 @@ check whether individual snippets were copied from older sources); for longitudi
 studies, the same filter lets you bound a corpus to a specific development era
 regardless of any LLM.
 
-**What this establishes:** If Start Date = Jan 1 2024, every extracted function and
+**What this establishes:** If Repo Creation Lower Bound = Jan 1 2024, every extracted function and
 class comes from a repository created on or after Jan 1 2024. SIEVE does not verify
 the origin of individual snippets, so code in a new repository may still have been
 copied or migrated from older sources.
