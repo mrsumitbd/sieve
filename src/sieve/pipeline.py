@@ -146,6 +146,42 @@ def _process_repo(
         return [], [], None
 
 
+def _stratified_caps(counts: dict[str, int], total_cap: int) -> dict[str, int]:
+    """
+    Split total_cap across repos in proportion to their available counts.
+
+    counts maps repo name to the number of extractable records in that repo.
+    Returns a dict with the same keys giving each repo's cap.
+    """
+    total_available = sum(counts.values())
+    if total_available == 0:
+        return {r: 0 for r in counts}
+    # Initial proportional allocation, min 1 only for repos that have content
+    caps = {}
+    for repo, cnt in counts.items():
+        if cnt == 0:
+            caps[repo] = 0
+        else:
+            caps[repo] = max(1, round(cnt / total_available * total_cap))
+    # Adjust to match exact total: distribute remainder to largest repos
+    current_total = sum(caps.values())
+    diff = current_total - total_cap
+    sorted_repos = sorted(counts.keys(), key=lambda r: -counts[r])
+    i = 0
+    while diff > 0:
+        repo = sorted_repos[i % len(sorted_repos)]
+        if caps[repo] > 0:
+            caps[repo] -= 1
+            diff -= 1
+        i += 1
+    while diff < 0:
+        repo = sorted_repos[i % len(sorted_repos)]
+        caps[repo] += 1
+        diff += 1
+        i += 1
+    return caps
+
+
 def _stratified_sample(records: list, cap: int, key: str = "repo") -> list:
     """
     Sample ``cap`` records from ``records`` with proportional allocation
@@ -306,35 +342,6 @@ def run_pipeline(
             )
 
         # Compute stratified per-repo caps
-        def _stratified_caps(counts: dict[str, int], total_cap: int) -> dict[str, int]:
-            total_available = sum(counts.values())
-            if total_available == 0:
-                return {r: 0 for r in counts}
-            # Initial proportional allocation — min 1 only for repos that have content
-            caps = {}
-            for repo, cnt in counts.items():
-                if cnt == 0:
-                    caps[repo] = 0
-                else:
-                    caps[repo] = max(1, round(cnt / total_available * total_cap))
-            # Adjust to match exact total — distribute remainder to largest repos
-            current_total = sum(caps.values())
-            diff = current_total - total_cap
-            sorted_repos = sorted(counts.keys(), key=lambda r: -counts[r])
-            i = 0
-            while diff > 0:
-                repo = sorted_repos[i % len(sorted_repos)]
-                if caps[repo] > 0:
-                    caps[repo] -= 1
-                    diff -= 1
-                i += 1
-            while diff < 0:
-                repo = sorted_repos[i % len(sorted_repos)]
-                caps[repo] += 1
-                diff += 1
-                i += 1
-            return caps
-
         func_caps  = (_stratified_caps(repo_func_counts,  config.max_functions)
                       if config.max_functions  is not None else {})
         class_caps = (_stratified_caps(repo_class_counts, config.max_classes)
