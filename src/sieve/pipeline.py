@@ -148,37 +148,67 @@ def _process_repo(
 
 def _stratified_caps(counts: dict[str, int], total_cap: int) -> dict[str, int]:
     """
-    Split total_cap across repos in proportion to their available counts.
+    Split total_cap across repos in proportion to their available counts,
+    using the largest remainder method with integer arithmetic only.
 
     counts maps repo name to the number of extractable records in that repo.
-    Returns a dict with the same keys giving each repo's cap.
+    Returns a dict with the same keys giving each repo's cap. Raises
+    ValueError if total_cap is negative.
+
+    The effective total is min(total_cap, sum(counts.values())). When it is
+    at least the number of non-empty repos, every non-empty repo first gets
+    1 and the rest is shared in proportion to the records beyond the first,
+    with leftover units going to the largest remainders (ties broken by
+    larger count, then by repo name ascending). When it is smaller than the
+    number of non-empty repos, the "at least 1" guarantee cannot hold: the
+    repos with the largest counts (ties by repo name ascending) get 1 each
+    and every other repo gets 0.
+
+    Guaranteed invariants:
+      - sum(caps) == min(total_cap, sum(counts.values()))
+      - 0 <= caps[repo] <= counts[repo]
+      - empty repos get 0
+      - every non-empty repo gets at least 1 when the effective total is at
+        least the number of non-empty repos
+      - the result is deterministic and independent of dict insertion order
+
+    Runs in O(n log n) for n repos.
     """
+    if total_cap < 0:
+        raise ValueError(f"total_cap must be >= 0, got {total_cap}")
+
     total_available = sum(counts.values())
     if total_available == 0:
         return {r: 0 for r in counts}
-    # Initial proportional allocation, min 1 only for repos that have content
-    caps = {}
-    for repo, cnt in counts.items():
-        if cnt == 0:
-            caps[repo] = 0
-        else:
-            caps[repo] = max(1, round(cnt / total_available * total_cap))
-    # Adjust to match exact total: distribute remainder to largest repos
-    current_total = sum(caps.values())
-    diff = current_total - total_cap
-    sorted_repos = sorted(counts.keys(), key=lambda r: -counts[r])
-    i = 0
-    while diff > 0:
-        repo = sorted_repos[i % len(sorted_repos)]
-        if caps[repo] > 0:
-            caps[repo] -= 1
-            diff -= 1
-        i += 1
-    while diff < 0:
-        repo = sorted_repos[i % len(sorted_repos)]
+
+    effective_cap = min(total_cap, total_available)
+    nonempty = [r for r, c in counts.items() if c > 0]
+    n = len(nonempty)
+    caps = {r: 0 for r in counts}
+
+    if effective_cap < n:
+        by_size = sorted(nonempty, key=lambda r: (-counts[r], r))
+        for repo in by_size[:effective_cap]:
+            caps[repo] = 1
+        return caps
+
+    for repo in nonempty:
+        caps[repo] = 1
+    extra = effective_cap - n
+    if extra == 0:
+        return caps
+
+    # extra <= sum of (count - 1), so the divisor below is positive
+    spare = {r: counts[r] - 1 for r in nonempty}
+    spare_total = sum(spare.values())
+    remainders = {}
+    for repo in nonempty:
+        share, remainders[repo] = divmod(extra * spare[repo], spare_total)
+        caps[repo] += share
+    leftover = effective_cap - sum(caps.values())
+    by_remainder = sorted(nonempty, key=lambda r: (-remainders[r], -counts[r], r))
+    for repo in by_remainder[:leftover]:
         caps[repo] += 1
-        diff += 1
-        i += 1
     return caps
 
 
