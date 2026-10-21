@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Optional, Iterator
 
 from github import Auth, Github, GithubException
-from github.GithubException import RateLimitExceededException
+from github.GithubException import BadCredentialsException, RateLimitExceededException
 from github.Repository import Repository
 
 from sieve.core.github_limits import fail_fast_retry
@@ -83,7 +83,7 @@ def _get_contributor_count(repo: Repository, token: str = None) -> int:
     try:
         # anon_contributors=False excludes bots, keeping count meaningful
         return repo.get_contributors(anon=False).totalCount
-    except RateLimitExceededException:
+    except (RateLimitExceededException, BadCredentialsException):
         raise
     except GithubException as e:
         logger.warning(f"Could not fetch contributors for {repo.full_name}: {e}")
@@ -149,7 +149,7 @@ def discover_repos(
             try:
                 last_commit = repo.get_commits()[0].commit.committer.date
                 last_commit_str = last_commit.isoformat()
-            except RateLimitExceededException:
+            except (RateLimitExceededException, BadCredentialsException):
                 raise
             except (GithubException, IndexError):
                 last_commit_str = repo.pushed_at.isoformat() if repo.pushed_at else "unknown"

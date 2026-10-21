@@ -25,6 +25,7 @@ from github.GithubException import RateLimitExceededException
 
 from sieve.core.github_limits import (
     UNAUTHENTICATED_LIMIT,
+    GitHubAuthError,
     GitHubQuotaError,
     describe_rate_limit_error,
     estimate_repos,
@@ -331,6 +332,10 @@ if run_button:
                 st.session_state.error = message
                 status.update(label="❌ GitHub rate limit reached", state="error", expanded=True)
                 st.error(message)
+            except GitHubAuthError as e:
+                st.session_state.error = str(e)
+                status.update(label="❌ GitHub token rejected", state="error", expanded=True)
+                st.error(str(e))
             except Exception as e:
                 st.session_state.error = str(e)
                 status.update(label="❌ Pipeline failed", state="error", expanded=True)

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, Optional
 
 from github import GithubRetry
-from github.GithubException import RateLimitExceededException
+from github.GithubException import BadCredentialsException, RateLimitExceededException
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,21 @@ class QuotaInfo:
     authenticated: bool
 
 
+BAD_TOKEN_MESSAGE = (
+    "GitHub rejected the token (401 Bad credentials). Check that it is a valid "
+    "classic token with the public_repo scope and has not expired."
+)
+
+
 class GitHubQuotaError(RuntimeError):
     """Raised when the GitHub quota is too low to do useful work."""
+
+
+class GitHubAuthError(RuntimeError):
+    """Raised when GitHub rejects the token (HTTP 401)."""
+
+    def __init__(self, message: str = BAD_TOKEN_MESSAGE):
+        super().__init__(message)
 
 
 # ─── Retry policy ─────────────────────────────────────────────────────────────
@@ -180,9 +193,11 @@ def build_exhausted_message(reset: Optional[datetime], authenticated: bool) -> s
 
 
 def describe_rate_limit_error(exc: Exception, authenticated: bool) -> str:
-    """User-facing text for a RateLimitExceededException or GitHubQuotaError."""
-    if isinstance(exc, GitHubQuotaError):
+    """User-facing text for a rate-limit, quota or token error."""
+    if isinstance(exc, (GitHubQuotaError, GitHubAuthError)):
         return str(exc)
+    if isinstance(exc, BadCredentialsException):
+        return BAD_TOKEN_MESSAGE
     return build_exhausted_message(reset_time_from_exception(exc), authenticated)
 
 

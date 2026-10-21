@@ -15,14 +15,17 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from github.GithubException import RateLimitExceededException
+from github.GithubException import BadCredentialsException, RateLimitExceededException
 
 from sieve.config import SIEVEConfig
 from sieve.core.discovery import RepoMetadata, discover_repos, make_client
 from sieve.core.github_limits import (
+    BAD_TOKEN_MESSAGE,
+    GitHubAuthError,
     GitHubQuotaError,
     QuotaInfo,
     build_exhausted_message,
+    describe_rate_limit_error,
     estimate_repos,
     format_quota_line,
     read_quota,
@@ -354,3 +357,71 @@ class TestPipelineRateLimit:
              patch("sieve.pipeline.time.sleep"):
             with pytest.raises(GitHubQuotaError):
                 run_pipeline(_config(tmp_path, engineered=True))
+
+
+# ─── Rejected token (HTTP 401) ────────────────────────────────────────────────
+
+_BAD_CREDENTIALS = (401, {}, {"message": "Bad credentials", "documentation_url": "https://docs.github.com"})
+
+
+def _auth_error():
+    return BadCredentialsException(401, {"message": "Bad credentials"}, None)
+
+
+class TestRejectedToken:
+    def test_message_text(self):
+        assert BAD_TOKEN_MESSAGE == (
+            "GitHub rejected the token (401 Bad credentials). Check that it is a valid "
+            "classic token with the public_repo scope and has not expired."
+        )
+        assert str(GitHubAuthError()) == BAD_TOKEN_MESSAGE
+        assert describe_rate_limit_error(_auth_error(), authenticated=True) == BAD_TOKEN_MESSAGE
+
+    def test_quota_read_with_401_gives_dedicated_error(self):
+        from sieve.pipeline import _fetch_quota
+
+        with _Server([_BAD_CREDENTIALS]) as server, \
+             patch("sieve.pipeline.make_client", side_effect=lambda t: make_client(t, base_url=server.url)):
+            with pytest.raises(GitHubAuthError) as info:
+                _fetch_quota("ghp_expired")
+
+        assert server.hits == 1
+        assert str(info.value) == BAD_TOKEN_MESSAGE
+
+    def test_pipeline_raises_before_any_work(self, tmp_path):
+        with patch("sieve.pipeline._fetch_quota", side_effect=GitHubAuthError()), \
+             patch("sieve.pipeline.discover_repos") as mock_discover:
+            with pytest.raises(GitHubAuthError):
+                run_pipeline(_config(tmp_path, token="ghp_expired"))
+
+        mock_discover.assert_not_called()
+        assert not (tmp_path / "out").exists()
+
+    def test_unrelated_quota_errors_are_still_swallowed(self):
+        from sieve.pipeline import _fetch_quota
+
+        with patch("sieve.pipeline.make_client", side_effect=OSError("offline")):
+            assert _fetch_quota("ghp_x") is None
+
+    def test_401_in_contributor_count_is_not_swallowed(self):
+        repo = _mock_repo("a/one")
+        repo.get_contributors.side_effect = _auth_error()
+
+        with patch("sieve.core.discovery.Github") as mock_gh:
+            mock_gh.return_value.search_repositories.return_value = _results([repo])
+            with pytest.raises(BadCredentialsException):
+                list(discover_repos("Python", date(2024, 1, 1), date(2024, 12, 31)))
+
+    def test_401_during_discovery_gives_dedicated_error(self, tmp_path):
+        with patch("sieve.pipeline.discover_repos", side_effect=_gen([_meta("a/one")], _auth_error())):
+            with pytest.raises(GitHubAuthError) as info:
+                run_pipeline(_config(tmp_path, token="ghp_expired"))
+
+        assert str(info.value) == BAD_TOKEN_MESSAGE
+
+    def test_401_during_engineered_filter_gives_dedicated_error(self, tmp_path):
+        with patch("sieve.pipeline.discover_repos", side_effect=_gen([_meta("a/one")])), \
+             patch("sieve.pipeline.collect_metrics", side_effect=_auth_error()), \
+             patch("sieve.pipeline.time.sleep"):
+            with pytest.raises(GitHubAuthError):
+                run_pipeline(_config(tmp_path, token="ghp_expired", engineered=True))

@@ -25,12 +25,13 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Optional
 
-from github.GithubException import RateLimitExceededException
+from github.GithubException import BadCredentialsException, RateLimitExceededException
 
 from sieve.config import SIEVEConfig
 from sieve.core.discovery import discover_repos, make_client, RepoMetadata
 from sieve.core.github_limits import (
     MIN_CALLS_REQUIRED,
+    GitHubAuthError,
     GitHubQuotaError,
     QuotaInfo,
     build_exhausted_message,
@@ -49,9 +50,15 @@ logger = logging.getLogger(__name__)
 
 
 def _fetch_quota(github_token: Optional[str]) -> Optional[QuotaInfo]:
-    """Read the GitHub quota once. Returns None if it cannot be read."""
+    """
+    Read the GitHub quota once. Returns None if it cannot be read.
+
+    Raises GitHubAuthError if GitHub rejects the token.
+    """
     try:
         return read_quota(make_client(github_token), authenticated=bool(github_token))
+    except BadCredentialsException as e:
+        raise GitHubAuthError() from e
     except Exception as e:
         logger.warning(f"Could not read GitHub rate limit: {e}")
         return None
@@ -336,6 +343,8 @@ def run_pipeline(
             if now - _last_progress_time >= 10:
                 _progress(f"  Discovering... {len(all_discovered)} repos found so far")
                 _last_progress_time = now
+    except BadCredentialsException as e:
+        raise GitHubAuthError() from e
     except RateLimitExceededException as e:
         rate_limit_reset = reset_time_from_exception(e)
         if not all_discovered:
@@ -370,6 +379,8 @@ def run_pipeline(
                     repo_path=None,   # No clone yet, so LOC will be 0 at this stage
                     github_token=config.github_token,
                 )
+            except BadCredentialsException as e:
+                raise GitHubAuthError() from e
             except RateLimitExceededException as e:
                 rate_limit_reset = reset_time_from_exception(e)
                 if not quality_map:

@@ -63,3 +63,20 @@ class TestHomeDefaults:
         values = {w.label: w.value for w in at.sidebar.number_input}
         assert values["Minimum Stars"] == 50
         assert values["Minimum Contributors"] == 5
+
+
+class TestHomeRejectedToken:
+    def test_run_with_rejected_token_shows_message(self):
+        from unittest.mock import patch
+
+        from sieve.core.github_limits import BAD_TOKEN_MESSAGE, GitHubAuthError
+
+        at = _app().run()
+        at.sidebar.text_input[0].set_value("ghp_expired")
+        with patch("sieve.pipeline.run_pipeline", side_effect=GitHubAuthError()):
+            at.sidebar.button[0].click().run()
+
+        assert not at.exception
+        assert BAD_TOKEN_MESSAGE in _texts(at.error)
+        assert at.session_state["error"] == BAD_TOKEN_MESSAGE
+        assert "GitHub token rejected" in at.status[0].label

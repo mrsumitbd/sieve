@@ -337,3 +337,14 @@ class TestRunErrorHandling:
         assert "Results are partial" in result.output
         assert "Add a GitHub token" in result.output
         assert "14:32 UTC" in result.output
+
+    def test_rejected_token_exits_1_with_one_line_message(self):
+        from sieve.core.github_limits import BAD_TOKEN_MESSAGE, GitHubAuthError
+
+        with patch("sieve.cli.run_pipeline", side_effect=GitHubAuthError()):
+            result = runner.invoke(app, self._ARGS + ["--github-token", "ghp_expired"])
+
+        assert result.exit_code == 1
+        assert "Traceback" not in result.output
+        errors = [ln for ln in result.output.splitlines() if ln.startswith("Error:")]
+        assert errors == [f"Error: {BAD_TOKEN_MESSAGE}"]

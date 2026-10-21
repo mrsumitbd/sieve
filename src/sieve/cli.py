@@ -27,7 +27,7 @@ from rich.table import Table
 load_dotenv()
 
 from sieve.config import SIEVEConfig, Language, Granularity, ExportFormat
-from sieve.core.github_limits import GitHubQuotaError, describe_rate_limit_error, partial_results_message
+from sieve.core.github_limits import GitHubAuthError, GitHubQuotaError, describe_rate_limit_error, partial_results_message
 from sieve.pipeline import run_pipeline
 
 app = typer.Typer(
@@ -134,7 +134,7 @@ def run(
 
     try:
         summary = run_pipeline(config, progress_callback=progress_callback)
-    except (RateLimitExceededException, GitHubQuotaError) as e:
+    except (RateLimitExceededException, GitHubQuotaError, GitHubAuthError) as e:
         typer.echo(f"Error: {describe_rate_limit_error(e, bool(config.github_token))}", err=True)
         raise typer.Exit(1)
     except Exception as e:

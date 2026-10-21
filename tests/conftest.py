@@ -155,5 +155,8 @@ def python_repo_no_tests(tmp_repo):
 
 @pytest.fixture(autouse=True)
 def _no_quota_lookup(monkeypatch):
-    """Keep run_pipeline tests off the network: skip the GitHub quota read."""
-    monkeypatch.setattr("sieve.pipeline._fetch_quota", lambda token: None)
+    """Keep run_pipeline tests off the network: the GitHub quota read fails offline and is skipped."""
+    def offline_client(*args, **kwargs):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr("sieve.pipeline.make_client", offline_client)

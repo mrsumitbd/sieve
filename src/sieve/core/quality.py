@@ -37,7 +37,7 @@ from typing import Optional
 import numpy as np
 
 from github import Auth, Github, GithubException
-from github.GithubException import RateLimitExceededException
+from github.GithubException import BadCredentialsException, RateLimitExceededException
 
 from sieve.core.github_limits import fail_fast_retry
 
@@ -331,7 +331,7 @@ def collect_metrics(
         pull_request_count = repo.get_pulls(state="all").totalCount
         issue_count = repo.get_issues(state="all").totalCount - pull_request_count
         issue_count = max(issue_count, 0)
-    except RateLimitExceededException:
+    except (RateLimitExceededException, BadCredentialsException):
         raise
     except GithubException as e:
         logger.warning(f"Could not fetch GitHub metrics for {repo_full_name}: {e}")
