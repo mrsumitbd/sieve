@@ -264,9 +264,9 @@ st.markdown("""
 |-----------|-------------|
 | **Min Stars** | Minimum GitHub star count. Higher values bias toward popular, well-maintained projects but reduce diversity. |
 | **Min Contributors** | Minimum unique contributor count. Helps exclude personal or toy projects. Note: bots are excluded from the count. |
-| **Max Repos** | Hard cap on the number of repos to process (0 = no cap). Applies during discovery, before cloning. |
-| **Max Functions** | Cap on total extracted functions *after deduplication*. When the corpus exceeds this, stratified sampling is applied (see below). |
-| **Max Classes** | Cap on total extracted classes *after deduplication*. Same stratified sampling applies. |
+| **Max Repos** | Hard cap on the number of repos to process (0 = no cap; default 20). Applies during discovery, before cloning. |
+| **Max Functions** | Cap on total extracted functions *after deduplication* (-1 = skip, 0 = no cap; default 30). When the corpus exceeds this, stratified sampling is applied (see below). |
+| **Max Classes** | Cap on total extracted classes *after deduplication* (-1 = skip, 0 = no cap; default 30). Same stratified sampling applies. |
 """)
 
 st.subheader("Content Filters")

@@ -48,3 +48,18 @@ class TestHomeRateLimitGuidance:
         assert len(warnings) == 1
         assert "14:32 UTC" in warnings[0]
         assert "Add a GitHub token" in warnings[0]
+
+
+class TestHomeDefaults:
+    def test_cap_defaults(self):
+        at = _app().run()
+        values = {w.label: w.value for w in at.sidebar.number_input}
+        assert values["Max Repos (0 = no cap)"] == 20
+        assert values["Max Functions (-1 = skip, 0 = no cap)"] == 30
+        assert values["Max Classes (-1 = skip, 0 = no cap)"] == 30
+
+    def test_other_defaults_unchanged(self):
+        at = _app().run()
+        values = {w.label: w.value for w in at.sidebar.number_input}
+        assert values["Minimum Stars"] == 50
+        assert values["Minimum Contributors"] == 5
