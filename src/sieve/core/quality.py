@@ -36,7 +36,10 @@ from pathlib import Path
 from typing import Optional
 import numpy as np
 
-from github import Github, GithubException
+from github import Auth, Github, GithubException
+from github.GithubException import BadCredentialsException, RateLimitExceededException
+
+from sieve.core.github_limits import fail_fast_retry
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +315,10 @@ def collect_metrics(
         RepoQualityMetrics with Stage 1 and Stage 2 pass/fail populated.
         Stage 3 is left False — set by apply_filters() after population stats.
     """
-    g = Github(github_token) if github_token else Github()
+    g = Github(
+        auth=Auth.Token(github_token) if github_token else None,
+        retry=fail_fast_retry(),
+    )
 
     release_count = 0
     pull_request_count = 0
@@ -325,6 +331,8 @@ def collect_metrics(
         pull_request_count = repo.get_pulls(state="all").totalCount
         issue_count = repo.get_issues(state="all").totalCount - pull_request_count
         issue_count = max(issue_count, 0)
+    except (RateLimitExceededException, BadCredentialsException):
+        raise
     except GithubException as e:
         logger.warning(f"Could not fetch GitHub metrics for {repo_full_name}: {e}")
 

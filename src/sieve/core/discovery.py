@@ -11,8 +11,11 @@ from datetime import date
 from dataclasses import dataclass
 from typing import Optional, Iterator
 
-from github import Github, GithubException
+from github import Auth, Github, GithubException
+from github.GithubException import BadCredentialsException, RateLimitExceededException
 from github.Repository import Repository
+
+from sieve.core.github_limits import fail_fast_retry
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +47,16 @@ LANGUAGE_QUERY_MAP = {
 GITHUB_SEARCH_PAGE_SIZE = 100
 
 
+def make_client(github_token: Optional[str] = None, **kwargs) -> Github:
+    """Build the GitHub client used for discovery (fails fast on rate limits)."""
+    return Github(
+        auth=Auth.Token(github_token) if github_token else None,
+        per_page=GITHUB_SEARCH_PAGE_SIZE,
+        retry=fail_fast_retry(),
+        **kwargs,
+    )
+
+
 def _build_query(
     language: str,
     start_date: date,
@@ -70,6 +83,8 @@ def _get_contributor_count(repo: Repository, token: str = None) -> int:
     try:
         # anon_contributors=False excludes bots, keeping count meaningful
         return repo.get_contributors(anon=False).totalCount
+    except (RateLimitExceededException, BadCredentialsException):
+        raise
     except GithubException as e:
         logger.warning(f"Could not fetch contributors for {repo.full_name}: {e}")
         return 0
@@ -98,7 +113,7 @@ def discover_repos(
         end_date:         Only include repos created on or before this date.
         min_stars:        Minimum star count
         min_contributors: Minimum unique contributor count
-        max_repos:        If set, stop after yielding this many repos
+        max_repos:        If set, stop after yielding this many repos (must be >= 0)
         github_token:     GitHub PAT. Without a token, GitHub allows 60 REST requests per hour and 10 search requests per minute.
 
     Yields:
@@ -106,7 +121,10 @@ def discover_repos(
     """
     from datetime import datetime, timezone
 
-    g = Github(github_token, per_page=GITHUB_SEARCH_PAGE_SIZE) if github_token else Github(per_page=GITHUB_SEARCH_PAGE_SIZE)
+    if max_repos is not None and max_repos < 0:
+        raise ValueError(f"max_repos must be >= 0 or None, got {max_repos}")
+
+    g = make_client(github_token)
     query = _build_query(language, start_date, end_date, min_stars)
 
     logger.info(f"GitHub search query: {query}")
@@ -131,6 +149,8 @@ def discover_repos(
             try:
                 last_commit = repo.get_commits()[0].commit.committer.date
                 last_commit_str = last_commit.isoformat()
+            except (RateLimitExceededException, BadCredentialsException):
+                raise
             except (GithubException, IndexError):
                 last_commit_str = repo.pushed_at.isoformat() if repo.pushed_at else "unknown"
 

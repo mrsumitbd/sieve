@@ -21,6 +21,16 @@ import pandas as pd
 import streamlit as st
 
 from sieve.config import SIEVEConfig, Language, Granularity, ExportFormat
+from github.GithubException import RateLimitExceededException
+
+from sieve.core.github_limits import (
+    UNAUTHENTICATED_LIMIT,
+    GitHubAuthError,
+    GitHubQuotaError,
+    describe_rate_limit_error,
+    estimate_repos,
+    partial_results_message,
+)
 from sieve.pipeline import run_pipeline
 from sieve.core.quality import check_cloc, CLOC_INSTALL_INSTRUCTIONS
 
@@ -154,13 +164,13 @@ with st.sidebar:
     st.subheader("Repository Filters")
     min_stars        = st.number_input("Minimum Stars",        min_value=0, value=50,  step=10)
     min_contributors = st.number_input("Minimum Contributors", min_value=1, value=5,   step=1)
-    max_repos        = st.number_input("Max Repos (0 = no cap)",      min_value=0, value=100, step=10)
+    max_repos        = st.number_input("Max Repos (0 = no cap)",      min_value=0, value=20,  step=10)
     max_functions    = st.number_input(
-        "Max Functions (-1 = skip, 0 = no cap)", min_value=-1, value=0, step=500,
+        "Max Functions (-1 = skip, 0 = no cap)", min_value=-1, value=30, step=10,
         help="Cap on total extracted functions. Set to -1 to skip function extraction entirely.",
     )
     max_classes = st.number_input(
-        "Max Classes (-1 = skip, 0 = no cap)", min_value=-1, value=0, step=100,
+        "Max Classes (-1 = skip, 0 = no cap)", min_value=-1, value=30, step=10,
         help="Cap on total extracted classes. Set to -1 to skip class extraction entirely.",
     )
 
@@ -231,6 +241,11 @@ with st.sidebar:
         "GitHub Token (PAT)", type="password",
         help="Recommended. Without it, rate limit is 60 requests/hour.",
     )
+    if not github_token:
+        st.info(
+            f"No token: GitHub allows {UNAUTHENTICATED_LIMIT} API requests per hour, enough for "
+            f"roughly {estimate_repos(UNAUTHENTICATED_LIMIT)} repositories. Add a token for full runs."
+        )
 
     run_button = st.button(
         "▶ Run SIEVE",
@@ -307,10 +322,20 @@ if run_button:
 
             try:
                 summary = run_pipeline(config, progress_callback=progress_callback)
+                summary["_ran_with_token"] = bool(resolved_token)
                 st.session_state.summary = summary
                 _pipeline_summary = summary.get("pipeline_summary", "")
                 _status_label = f"✅ Pipeline complete! {_pipeline_summary}"
                 status.update(label=_status_label, state="complete", expanded=False)
+            except (RateLimitExceededException, GitHubQuotaError) as e:
+                message = describe_rate_limit_error(e, bool(resolved_token))
+                st.session_state.error = message
+                status.update(label="❌ GitHub rate limit reached", state="error", expanded=True)
+                st.error(message)
+            except GitHubAuthError as e:
+                st.session_state.error = str(e)
+                status.update(label="❌ GitHub token rejected", state="error", expanded=True)
+                st.error(str(e))
             except Exception as e:
                 st.session_state.error = str(e)
                 status.update(label="❌ Pipeline failed", state="error", expanded=True)
@@ -346,6 +371,9 @@ if st.session_state.error and not st.session_state.summary:
 if st.session_state.summary:
     s = st.session_state.summary
     st.divider()
+
+    if s.get("rate_limited"):
+        st.warning(partial_results_message(s.get("rate_limit_reset"), bool(s.get("_ran_with_token"))))
 
     if s.get("_is_demo"):
         st.info(

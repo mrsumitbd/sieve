@@ -38,7 +38,7 @@ class SIEVEConfig(BaseModel):
     # --- Repo quality filters ---
     min_stars: int = Field(default=10, ge=0, description="Minimum number of GitHub stars")
     min_contributors: int = Field(default=1, ge=1, description="Minimum number of unique contributors")
-    max_repos: Optional[int] = Field(default=None, description="Cap on number of repos to process. None = no cap")
+    max_repos: Optional[int] = Field(default=None, ge=0, description="Cap on number of repos to process. None = no cap")
     max_functions: Optional[int] = Field(default=None, ge=0, description="Cap on total functions. None = no cap, 0 = extract no functions")
     max_classes: Optional[int] = Field(default=None, ge=0, description="Cap on total classes. None = no cap, 0 = extract no classes")
 
