@@ -173,3 +173,22 @@ def build_exhausted_message(reset: Optional[datetime], authenticated: bool) -> s
         f"enough for roughly {estimate_repos(UNAUTHENTICATED_LIMIT)} repositories. "
         f"{token_hint()}"
     )
+
+
+def describe_rate_limit_error(exc: Exception, authenticated: bool) -> str:
+    """User-facing text for a RateLimitExceededException or GitHubQuotaError."""
+    if isinstance(exc, GitHubQuotaError):
+        return str(exc)
+    return build_exhausted_message(reset_time_from_exception(exc), authenticated)
+
+
+def partial_results_message(reset_iso: Optional[str], authenticated: bool) -> str:
+    """Warning shown when a run finished early because of the rate limit."""
+    reset = datetime.fromisoformat(reset_iso) if reset_iso else None
+    msg = (
+        "Results are partial because the GitHub rate limit was reached. "
+        f"It resets at {format_reset(reset)}."
+    )
+    if not authenticated:
+        msg += " Add a GitHub token for full runs."
+    return msg

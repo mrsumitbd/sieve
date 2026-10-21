@@ -237,3 +237,103 @@ class TestValidateConfigCommand:
         result = runner.invoke(app, ["validate-config", str(config_file)])
         assert result.exit_code == 0
         assert "JavaScript" in result.output
+
+# ─── Rate limits and config errors ────────────────────────────────────────────
+
+class TestRunErrorHandling:
+    _ARGS = ["run", "--language", "Python", "--start-date", "2024-01-01", "--end-date", "2025-01-01"]
+
+    def test_bad_config_file_gives_one_line_error(self, tmp_path):
+        config_file = tmp_path / "bad.json"
+        config_file.write_text(json.dumps({
+            "language": "Python",
+            "start_date": "2024-01-01",
+            "end_date": "2025-01-01",
+            "min_stars": -5,
+        }))
+
+        with patch("sieve.cli.run_pipeline") as mock_run:
+            result = runner.invoke(app, ["run", "--config", str(config_file)])
+
+        assert result.exit_code == 1
+        mock_run.assert_not_called()
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        assert "Traceback" not in result.output
+        lines = [ln for ln in result.output.splitlines() if ln.strip()]
+        assert len(lines) == 1
+        assert lines[0].startswith("Error: invalid config: min_stars:")
+        assert "pydantic" not in result.output.lower()
+
+    def test_bad_inline_value_gives_one_line_error(self):
+        with patch("sieve.cli.run_pipeline"):
+            result = runner.invoke(app, self._ARGS + ["--dedup-threshold", "1.5"])
+
+        assert result.exit_code == 1
+        assert "Traceback" not in result.output
+        lines = [ln for ln in result.output.splitlines() if ln.strip()]
+        assert len(lines) == 1
+        assert "dedup_threshold" in lines[0]
+
+    def test_validate_config_error_is_one_line(self, tmp_path):
+        config_file = tmp_path / "bad.json"
+        config_file.write_text(json.dumps({
+            "language": "Python",
+            "start_date": "2024-01-01",
+            "end_date": "2025-01-01",
+            "dedup_threshold": 2,
+        }))
+
+        result = runner.invoke(app, ["validate-config", str(config_file)])
+
+        assert result.exit_code == 1
+        lines = [ln for ln in result.output.splitlines() if ln.strip()]
+        assert len(lines) == 1
+        assert "dedup_threshold" in lines[0]
+
+    def test_rate_limit_exception_exits_1_with_helper_message(self):
+        from github.GithubException import RateLimitExceededException
+        from sieve.core.github_limits import build_exhausted_message, reset_time_from_exception
+
+        exc = RateLimitExceededException(
+            403, {"message": "API rate limit exceeded"}, {"X-RateLimit-Reset": "1893508320"}
+        )
+        with patch("sieve.cli.run_pipeline", side_effect=exc):
+            result = runner.invoke(app, self._ARGS, env={"GITHUB_TOKEN": ""})
+
+        assert result.exit_code == 1
+        expected = build_exhausted_message(reset_time_from_exception(exc), authenticated=False)
+        assert f"Error: {expected}" in result.output
+        assert "--github-token" in result.output
+        assert "Traceback" not in result.output
+
+    def test_rate_limit_exception_with_token_omits_token_advice(self):
+        from github.GithubException import RateLimitExceededException
+
+        exc = RateLimitExceededException(
+            403, {"message": "API rate limit exceeded"}, {"X-RateLimit-Reset": "1893508320"}
+        )
+        with patch("sieve.cli.run_pipeline", side_effect=exc):
+            result = runner.invoke(app, self._ARGS + ["--github-token", "ghp_example"])
+
+        assert result.exit_code == 1
+        assert "Error: GitHub API rate limit reached" in result.output
+        assert "public_repo" not in result.output
+
+    def test_quota_error_exits_1_with_its_message(self):
+        from sieve.core.github_limits import GitHubQuotaError
+
+        with patch("sieve.cli.run_pipeline", side_effect=GitHubQuotaError("quota too low")):
+            result = runner.invoke(app, self._ARGS)
+
+        assert result.exit_code == 1
+        assert "Error: quota too low" in result.output
+
+    def test_partial_result_prints_warning(self):
+        partial = {**_FAKE_SUMMARY, "rate_limited": True, "rate_limit_reset": "2030-01-01T14:32:00+00:00"}
+        with patch("sieve.cli.run_pipeline", return_value=partial):
+            result = runner.invoke(app, self._ARGS, env={"GITHUB_TOKEN": ""})
+
+        assert result.exit_code == 0
+        assert "Results are partial" in result.output
+        assert "Add a GitHub token" in result.output
+        assert "14:32 UTC" in result.output

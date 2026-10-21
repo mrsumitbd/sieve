@@ -18,6 +18,8 @@ from typing import Optional
 
 import typer
 from dotenv import load_dotenv
+from github.GithubException import RateLimitExceededException
+from pydantic import ValidationError
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -25,6 +27,7 @@ from rich.table import Table
 load_dotenv()
 
 from sieve.config import SIEVEConfig, Language, Granularity, ExportFormat
+from sieve.core.github_limits import GitHubQuotaError, describe_rate_limit_error, partial_results_message
 from sieve.pipeline import run_pipeline
 
 app = typer.Typer(
@@ -39,6 +42,15 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
+
+
+def _format_validation_error(e: ValidationError) -> str:
+    """One line naming each invalid field and the problem, without the pydantic dump."""
+    parts = []
+    for err in e.errors():
+        field = ".".join(str(p) for p in err["loc"]) or "config"
+        parts.append(f"{field}: {err['msg']}")
+    return "; ".join(parts)
 
 
 @app.command("run")
@@ -66,7 +78,11 @@ def run(
     if config_file:
         with open(config_file) as f:
             raw = json.load(f)
-        config = SIEVEConfig(**raw)
+        try:
+            config = SIEVEConfig(**raw)
+        except ValidationError as e:
+            typer.echo(f"Error: invalid config: {_format_validation_error(e)}", err=True)
+            raise typer.Exit(1)
     else:
         if not language:
             console.print("[red]--language is required when not using a config file.[/red]")
@@ -84,23 +100,27 @@ def run(
             console.print(f"[red]Invalid date format: {e}. Use YYYY-MM-DD.[/red]")
             raise typer.Exit(1)
 
-        config = SIEVEConfig(
-            language=language,
-            start_date=parsed_start,
-            end_date=parsed_end,
-            min_stars=min_stars,
-            min_contributors=min_contributors,
-            max_repos=max_repos,
-            max_functions=max_functions,
-            max_classes=max_classes,
-            granularity=["function", "class"],
-            engineered_only=engineered_only,
-            deduplicate=deduplicate,
-            dedup_threshold=dedup_threshold,
-            output_dir=output_dir,
-            export_format=export_format,
-            github_token=github_token,
-        )
+        try:
+            config = SIEVEConfig(
+                language=language,
+                start_date=parsed_start,
+                end_date=parsed_end,
+                min_stars=min_stars,
+                min_contributors=min_contributors,
+                max_repos=max_repos,
+                max_functions=max_functions,
+                max_classes=max_classes,
+                granularity=["function", "class"],
+                engineered_only=engineered_only,
+                deduplicate=deduplicate,
+                dedup_threshold=dedup_threshold,
+                output_dir=output_dir,
+                export_format=export_format,
+                github_token=github_token,
+            )
+        except ValidationError as e:
+            typer.echo(f"Error: invalid config: {_format_validation_error(e)}", err=True)
+            raise typer.Exit(1)
 
     console.print(f"\n[bold cyan]🔬 SIEVE[/bold cyan] — starting pipeline\n")
     console.print_json(config.model_dump_json(indent=2))
@@ -114,6 +134,9 @@ def run(
 
     try:
         summary = run_pipeline(config, progress_callback=progress_callback)
+    except (RateLimitExceededException, GitHubQuotaError) as e:
+        typer.echo(f"Error: {describe_rate_limit_error(e, bool(config.github_token))}", err=True)
+        raise typer.Exit(1)
     except Exception as e:
         console.print(f"\n[red]Pipeline failed: {e}[/red]")
         raise typer.Exit(1)
@@ -129,6 +152,12 @@ def run(
     table.add_row("Functions Extracted", str(summary["total_functions"]))
     table.add_row("Classes Extracted",   str(summary["total_classes"]))
     console.print(table)
+
+    if summary.get("rate_limited"):
+        typer.echo(
+            "Warning: " + partial_results_message(summary.get("rate_limit_reset"), bool(config.github_token)),
+            err=True,
+        )
 
     console.print("\n[bold]Output files:[/bold]")
     for label, path in summary["output_paths"].items():
@@ -149,6 +178,9 @@ def validate_config(config_file: Path = typer.Argument(..., help="Path to JSON c
         config = SIEVEConfig(**raw)
         console.print("[green]✓ Config is valid[/green]")
         console.print_json(config.model_dump_json(indent=2))
+    except ValidationError as e:
+        typer.echo(f"✗ Config invalid: {_format_validation_error(e)}", err=True)
+        raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]✗ Config invalid: {e}[/red]")
         raise typer.Exit(1)
