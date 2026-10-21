@@ -5,8 +5,9 @@ GitHub API rate-limit handling: a retry policy that fails fast on primary
 rate limits, quota helpers and user-facing messages.
 
 Without a token GitHub allows 60 REST requests per hour. Discovery spends
-roughly three calls per qualifying repository (contributors, latest commit,
-topics), so an anonymous run is exhausted after about 20 repositories.
+three calls per qualifying repository (contributors, latest commit, topics)
+plus one contributors call for every scanned repository that is rejected, so
+a small anonymous run is exhausted after roughly ten accepted repositories.
 """
 
 import json
@@ -21,7 +22,10 @@ from github.GithubException import RateLimitExceededException
 logger = logging.getLogger(__name__)
 
 UNAUTHENTICATED_LIMIT = 60
-CALLS_PER_REPO = 3
+# Deliberately conservative planning figure per accepted repository: 3 calls
+# for the repository itself plus scan overhead (one contributors call for each
+# scanned repository that is then rejected).
+CALLS_PER_REPO = 6
 MIN_CALLS_REQUIRED = 10
 
 # A primary rate limit that resets sooner than this is waited out (this is the

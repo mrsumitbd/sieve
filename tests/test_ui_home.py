@@ -28,7 +28,7 @@ class TestHomeRateLimitGuidance:
         hints = [t for t in _texts(at.info) if t.startswith("No token:")]
         assert len(hints) == 1
         assert "60 API requests per hour" in hints[0]
-        assert "roughly 20 repositories" in hints[0]
+        assert "roughly 10 repositories" in hints[0]
 
     def test_token_hides_quota_hint(self):
         at = _app().run()

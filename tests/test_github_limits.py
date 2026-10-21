@@ -152,7 +152,9 @@ class TestHelpers:
         assert format_quota_line(_quota(4990, True)).endswith("(token)")
 
     def test_estimate_repos(self):
-        assert estimate_repos(60) == 20
+        assert estimate_repos(60) == 10
+        assert estimate_repos(6) == 1
+        assert estimate_repos(5) == 0
         assert estimate_repos(2) == 0
         assert estimate_repos(-5) == 0
 
