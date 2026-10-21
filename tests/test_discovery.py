@@ -214,3 +214,34 @@ class TestDiscoverRepos:
                     min_stars=50,
                     min_contributors=5,
                 ))
+
+
+class TestDiscoverMaxReposValidation:
+    @pytest.mark.parametrize("bad", [-1, -100])
+    def test_negative_max_repos_raises_before_any_api_call(self, bad):
+        from sieve.core.discovery import discover_repos
+
+        with patch("sieve.core.discovery.Github") as mock_gh:
+            with pytest.raises(ValueError, match="max_repos"):
+                list(discover_repos(
+                    language="Python",
+                    start_date=date(2024, 1, 1),
+                    end_date=date(2025, 1, 1),
+                    max_repos=bad,
+                ))
+        mock_gh.assert_not_called()
+
+    def test_zero_max_repos_yields_nothing(self):
+        from sieve.core.discovery import discover_repos
+
+        with patch("sieve.core.discovery.Github") as mock_gh:
+            found = MagicMock()
+            found.__iter__.return_value = iter([MagicMock()])
+            mock_gh.return_value.search_repositories.return_value = found
+            results = list(discover_repos(
+                language="Python",
+                start_date=date(2024, 1, 1),
+                end_date=date(2025, 1, 1),
+                max_repos=0,
+            ))
+        assert results == []

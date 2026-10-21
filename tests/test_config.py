@@ -119,3 +119,25 @@ class TestExtractionCaps:
             **{field: value},
         )
         assert getattr(cfg, field) == value
+
+
+class TestMaxRepos:
+    @pytest.mark.parametrize("bad", [-1, -5])
+    def test_negative_max_repos_raises(self, bad):
+        with pytest.raises(ValidationError, match="max_repos"):
+            SIEVEConfig(
+                language="Python",
+                start_date=date(2024, 1, 1),
+                end_date=date(2025, 1, 1),
+                max_repos=bad,
+            )
+
+    @pytest.mark.parametrize("value", [None, 0, 1, 500])
+    def test_valid_max_repos_accepted(self, value):
+        cfg = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_repos=value,
+        )
+        assert cfg.max_repos == value

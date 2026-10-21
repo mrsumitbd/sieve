@@ -113,13 +113,16 @@ def discover_repos(
         end_date:         Only include repos created on or before this date.
         min_stars:        Minimum star count
         min_contributors: Minimum unique contributor count
-        max_repos:        If set, stop after yielding this many repos
+        max_repos:        If set, stop after yielding this many repos (must be >= 0)
         github_token:     GitHub PAT. Without a token, GitHub allows 60 REST requests per hour and 10 search requests per minute.
 
     Yields:
         RepoMetadata for each qualifying repo
     """
     from datetime import datetime, timezone
+
+    if max_repos is not None and max_repos < 0:
+        raise ValueError(f"max_repos must be >= 0 or None, got {max_repos}")
 
     g = make_client(github_token)
     query = _build_query(language, start_date, end_date, min_stars)
