@@ -166,11 +166,11 @@ with st.sidebar:
     min_contributors = st.number_input("Minimum Contributors", min_value=1, value=5,   step=1)
     max_repos        = st.number_input("Max Repos (0 = no cap)",      min_value=0, value=20,  step=10)
     max_functions    = st.number_input(
-        "Max Functions (-1 = skip, 0 = no cap)", min_value=-1, value=30, step=500,
+        "Max Functions (-1 = skip, 0 = no cap)", min_value=-1, value=30, step=10,
         help="Cap on total extracted functions. Set to -1 to skip function extraction entirely.",
     )
     max_classes = st.number_input(
-        "Max Classes (-1 = skip, 0 = no cap)", min_value=-1, value=30, step=100,
+        "Max Classes (-1 = skip, 0 = no cap)", min_value=-1, value=30, step=10,
         help="Cap on total extracted classes. Set to -1 to skip class extraction entirely.",
     )
 
