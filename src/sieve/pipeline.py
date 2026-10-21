@@ -25,8 +25,20 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Optional
 
+from github.GithubException import RateLimitExceededException
+
 from sieve.config import SIEVEConfig
-from sieve.core.discovery import discover_repos, RepoMetadata
+from sieve.core.discovery import discover_repos, make_client, RepoMetadata
+from sieve.core.github_limits import (
+    MIN_CALLS_REQUIRED,
+    GitHubQuotaError,
+    QuotaInfo,
+    build_exhausted_message,
+    format_quota_line,
+    format_reset,
+    read_quota,
+    reset_time_from_exception,
+)
 from sieve.core.detection import detect_test_suite
 from sieve.core.extraction import extract_from_repo, count_repo_contents, FunctionRecord, ClassRecord
 from sieve.core.deduplication import deduplicate
@@ -34,6 +46,15 @@ from sieve.core.export import export_dataset
 from sieve.core.quality import collect_metrics, apply_filters, RepoQualityMetrics
 
 logger = logging.getLogger(__name__)
+
+
+def _fetch_quota(github_token: Optional[str]) -> Optional[QuotaInfo]:
+    """Read the GitHub quota once. Returns None if it cannot be read."""
+    try:
+        return read_quota(make_client(github_token), authenticated=bool(github_token))
+    except Exception as e:
+        logger.warning(f"Could not read GitHub rate limit: {e}")
+        return None
 
 
 def _clone_repo(repo_full_name: str, target_dir: str) -> bool:
@@ -288,22 +309,43 @@ def run_pipeline(
     _discovery_start = _time.time()
     _progress("Starting repo discovery...")
 
+    authenticated = bool(config.github_token)
+    rate_limited = False
+    rate_limit_reset = None
+
+    quota = _fetch_quota(config.github_token)
+    if quota is not None:
+        _progress(format_quota_line(quota))
+        if quota.core_remaining < MIN_CALLS_REQUIRED:
+            raise GitHubQuotaError(build_exhausted_message(quota.core_reset, authenticated))
+
     all_discovered: list[RepoMetadata] = []
     _last_progress_time = _time.time()
-    for repo_meta in discover_repos(
-        language=config.language,
-        start_date=config.start_date,
-        end_date=config.end_date,
-        min_stars=config.min_stars,
-        min_contributors=config.min_contributors,
-        max_repos=config.max_repos,
-        github_token=config.github_token,
-    ):
-        all_discovered.append(repo_meta)
-        now = _time.time()
-        if now - _last_progress_time >= 10:
-            _progress(f"  Discovering... {len(all_discovered)} repos found so far")
-            _last_progress_time = now
+    try:
+        for repo_meta in discover_repos(
+            language=config.language,
+            start_date=config.start_date,
+            end_date=config.end_date,
+            min_stars=config.min_stars,
+            min_contributors=config.min_contributors,
+            max_repos=config.max_repos,
+            github_token=config.github_token,
+        ):
+            all_discovered.append(repo_meta)
+            now = _time.time()
+            if now - _last_progress_time >= 10:
+                _progress(f"  Discovering... {len(all_discovered)} repos found so far")
+                _last_progress_time = now
+    except RateLimitExceededException as e:
+        rate_limit_reset = reset_time_from_exception(e)
+        if not all_discovered:
+            raise GitHubQuotaError(build_exhausted_message(rate_limit_reset, authenticated)) from e
+        rate_limited = True
+        _progress(
+            f"Warning: GitHub rate limit reached during discovery (resets at "
+            f"{format_reset(rate_limit_reset)}). Results are partial: continuing with "
+            f"the {len(all_discovered)} repositories found so far."
+        )
 
     total_discovered = len(all_discovered)
     _discovery_elapsed = _time.time() - _discovery_start
@@ -320,13 +362,25 @@ def run_pipeline(
                 f"  Quality metrics [{idx+1}/{total_discovered}]: {repo_meta.full_name}",
                 idx + 1, total_discovered,
             )
-            metrics = collect_metrics(
-                repo_full_name=repo_meta.full_name,
-                license_spdx=repo_meta.license_spdx,
-                contributor_count=repo_meta.contributors,
-                repo_path=None,   # No clone yet — LOC will be 0 at this stage
-                github_token=config.github_token,
-            )
+            try:
+                metrics = collect_metrics(
+                    repo_full_name=repo_meta.full_name,
+                    license_spdx=repo_meta.license_spdx,
+                    contributor_count=repo_meta.contributors,
+                    repo_path=None,   # No clone yet, so LOC will be 0 at this stage
+                    github_token=config.github_token,
+                )
+            except RateLimitExceededException as e:
+                rate_limit_reset = reset_time_from_exception(e)
+                if not quality_map:
+                    raise GitHubQuotaError(build_exhausted_message(rate_limit_reset, authenticated)) from e
+                rate_limited = True
+                _progress(
+                    f"Warning: GitHub rate limit reached during the engineered filter (resets at "
+                    f"{format_reset(rate_limit_reset)}). Results are partial: only the "
+                    f"{len(quality_map)} of {total_discovered} repositories checked so far are kept."
+                )
+                break
             quality_map[repo_meta.full_name] = metrics
             time.sleep(0.3)
 
@@ -674,6 +728,8 @@ def run_pipeline(
         "failed_repos": failed_repos,
         "output_paths": output_paths,
         "output_dir": config.output_dir,
+        "rate_limited": rate_limited,
+        "rate_limit_reset": rate_limit_reset.isoformat() if rate_limit_reset else None,
         "repo_metadata": repo_metadata_list,
         # Per-repo counts for charts
         "repo_stats": [

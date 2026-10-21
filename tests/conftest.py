@@ -152,3 +152,8 @@ def python_repo_no_tests(tmp_repo):
         "src/app.py": "def run(): pass\n",
         "README.md": "# My project\n",
     })
+
+@pytest.fixture(autouse=True)
+def _no_quota_lookup(monkeypatch):
+    """Keep run_pipeline tests off the network: skip the GitHub quota read."""
+    monkeypatch.setattr("sieve.pipeline._fetch_quota", lambda token: None)
