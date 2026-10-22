@@ -12,7 +12,7 @@ pinned: false
 **Software Ingestion & Extraction for Verifiable Evaluation**
 
 [![Coverage](https://codecov.io/gh/mrsumitbd/sieve/graph/badge.svg?token=19aecee5-afb0-4d67-9c0d-bdab723ce8d3)](https://codecov.io/gh/mrsumitbd/sieve)
-![Tests](https://img.shields.io/badge/tests-455%20tests-brightgreen?style=flat-square)
+[![Tests](https://github.com/mrsumitbd/sieve/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mrsumitbd/sieve/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![Languages](https://img.shields.io/badge/languages-Python%20%7C%20Java%20%7C%20JavaScript%20%7C%20C%2B%2B-orange?style=flat-square)
