@@ -287,8 +287,4 @@ The suite covers unit, integration, and end-to-end levels. GitHub and git are mo
 
 ## Citation
 
-If you use SIEVE in your research, please cite:
-
-```bibtex
-TBA
-```
+If you use SIEVE in your research, please cite it using the metadata in [`CITATION.cff`](CITATION.cff). On GitHub, the **Cite this repository** button in the repository sidebar produces ready-to-use citations from that file.
