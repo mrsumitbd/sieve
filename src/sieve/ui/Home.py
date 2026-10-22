@@ -34,9 +34,7 @@ from sieve.core.github_limits import (
 from sieve.pipeline import run_pipeline
 from sieve.core.quality import check_cloc, CLOC_INSTALL_INSTRUCTIONS
 
-# ─── Demo dataset helpers ─────────────────────────────────────────────────────
-
-_DEMO_DIR = Path(__file__).parent / "demo_data"
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 # Language → Streamlit syntax highlighting identifier
 _LANG_HIGHLIGHT = {
@@ -45,31 +43,6 @@ _LANG_HIGHLIGHT = {
     "JavaScript": "javascript",
     "C++":        "cpp",
 }
-
-
-def load_demo_dataset() -> dict:
-    fn_path  = _DEMO_DIR / "functions.jsonl"
-    cl_path  = _DEMO_DIR / "classes.jsonl"
-    manifest = json.loads((_DEMO_DIR / "manifest.json").read_text())
-
-    return {
-        "total_repos_discovered":          3,
-        "total_repos_after_quality_filter": 3,
-        "total_repos_processed":           3,
-        "total_repos_failed":              0,
-        "total_functions":                 manifest["summary"]["total_functions"],
-        "total_classes":                   manifest["summary"]["total_classes"],
-        "failed_repos":                    [],
-        "output_paths": {
-            "functions_jsonl": str(fn_path),
-            "classes_jsonl":   str(cl_path),
-            "manifest":        str(_DEMO_DIR / "manifest.json"),
-        },
-        "output_dir":    str(_DEMO_DIR),
-        "repo_stats":    manifest["repo_stats"],
-        "repo_metadata": manifest.get("repo_metadata", []),
-        "_is_demo":      True,
-    }
 
 
 def _build_zip(output_paths: dict) -> bytes:
@@ -253,16 +226,6 @@ with st.sidebar:
         use_container_width=True,
     )
 
-    st.divider()
-    demo_button = st.button(
-        "📦 Load Example Dataset",
-        use_container_width=True,
-        help=(
-            "Load a pre-built demo corpus (54 functions/methods, 8 classes "
-            "across 3 synthetic repositories). No GitHub token required."
-        ),
-    )
-
 
 # ─── Pipeline Execution ───────────────────────────────────────────────────────
 
@@ -348,18 +311,6 @@ if st.session_state.pipeline_log and not run_button:
         st.code("\n".join(st.session_state.pipeline_log), language=None)
 
 
-# ─── Demo Dataset Load ────────────────────────────────────────────────────────
-
-if demo_button:
-    try:
-        st.session_state.summary          = load_demo_dataset()
-        st.session_state.error            = None
-        st.session_state.sample           = None
-        st.session_state.output_dir_path  = None
-    except Exception as e:
-        st.error(f"Could not load demo dataset: {e}")
-
-
 # ─── Results ─────────────────────────────────────────────────────────────────
 
 if st.session_state.error and not st.session_state.summary:
@@ -371,14 +322,6 @@ if st.session_state.summary:
 
     if s.get("rate_limited"):
         st.warning(partial_results_message(s.get("rate_limit_reset"), bool(s.get("_ran_with_token"))))
-
-    if s.get("_is_demo"):
-        st.info(
-            "**📦 Demo dataset loaded.** "
-            "Showing pre-built corpus from 3 synthetic repositories. "
-            "Click **▶ Run SIEVE** with a GitHub token to build a real corpus.",
-            icon="ℹ️",
-        )
 
     # ── Summary Metrics ───────────────────────────────────────────────────────
 
@@ -400,7 +343,7 @@ if st.session_state.summary:
     output_paths = s.get("output_paths", {})
     existing     = {k: v for k, v in output_paths.items() if Path(v).exists()}
 
-    if existing and not s.get("_is_demo"):
+    if existing:
         st.divider()
         st.subheader("⬇️ Download Corpus")
 
@@ -760,7 +703,7 @@ if st.session_state.summary:
                         else:
                             st.warning("AST could not be generated for this snippet.")
     else:
-        st.info("No JSONL output files found. Run the pipeline or load the example dataset.")
+        st.info("No JSONL output files found. Run the pipeline to generate them.")
 
 
 # ─── Welcome screen ───────────────────────────────────────────────────────────
@@ -769,14 +712,9 @@ else:
     st.markdown("""
     **How to use SIEVE:**
     1. Set your parameters in the sidebar
-    2. Provide a GitHub Personal Access Token
+    2. Optionally add a GitHub Personal Access Token (recommended for full runs)
     3. Click **▶ Run SIEVE** to start collection
     4. Browse results, download your corpus, and inspect random samples
-
-    — or —
-
-    Click **📦 Load Example Dataset** to explore a pre-built corpus instantly,
-    with no token required.
     """)
 
 

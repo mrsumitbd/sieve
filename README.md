@@ -97,7 +97,7 @@ Open `.env` and add the line `GITHUB_TOKEN=<your GitHub Personal Access Token>`.
 streamlit run src/sieve/ui/Home.py
 ```
 
-Open `http://localhost:8501`. Click **📦 Load Example Dataset** to explore without a GitHub token, or configure parameters in the sidebar and click **▶ Run SIEVE** to build a real corpus.
+Open `http://localhost:8501`, configure parameters in the sidebar and click **▶ Run SIEVE** to build a corpus. A GitHub token is optional but recommended for full runs.
 
 ### CLI
 

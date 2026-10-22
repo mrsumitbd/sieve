@@ -50,6 +50,21 @@ class TestHomeRateLimitGuidance:
         assert "Add a GitHub token" in warnings[0]
 
 
+class TestHomeWelcome:
+    def test_token_step_is_optional_and_no_example_option(self):
+        at = _app().run()
+        assert not at.exception
+        text = " ".join(_all_text(at))
+        assert "Optionally add a GitHub Personal Access Token" in text
+        assert "recommended for full runs" in text
+        assert "Example Dataset" not in text
+        assert "— or —" not in text
+
+    def test_run_is_the_only_button(self):
+        at = _app().run()
+        assert [b.label for b in at.sidebar.button] == ["▶ Run SIEVE"]
+
+
 class TestHomeDefaults:
     def test_cap_defaults(self):
         at = _app().run()

@@ -37,9 +37,6 @@ sieve = "sieve.cli:app"
 where = ["src"]
 include = ["sieve*"]
 
-[tool.setuptools.package-data]
-"sieve.ui.demo_data" = ["*.jsonl", "*.json"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
