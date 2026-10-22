@@ -362,16 +362,17 @@ with st.expander("Why does a repository show 0 functions/methods or 0 classes?")
     9 classes, but most are forward declarations (`class ImGuiContext;`) which
     SIEVE correctly excludes. After filtering, 0 real class definitions remain.
 
-    **2. Stratified cap allocation rounds a small repo to 0.**
-    When **Max Functions/Methods** or **Max Classes** is set, SIEVE allocates
-    slots proportionally across repos. A very small repo competing with much
-    larger ones may receive a 0 allocation after rounding.
+    **2. The cap is smaller than the number of repositories.**
+    When **Max Functions/Methods** or **Max Classes** is set, SIEVE gives every
+    repository that has records at least 1 slot and splits the rest in proportion
+    to repository size. If the cap is smaller than the number of repositories
+    with records, that minimum cannot be met: the largest repositories get 1 slot
+    each and the others get 0.
 
     For example, with Max Classes = 30 across 10 repos where `godot` has 8,168
-    classes and `imgui` has 9, imgui's proportional share is less than 1 and may
-    round to 0. SIEVE uses a minimum-of-1 allocation to avoid this, but if the
-    repo then returns 0 real classes after filtering (see point 1), nothing can
-    be done.
+    classes and `imgui` has 9, imgui still receives at least 1 slot rather than
+    being rounded down to 0. If the repo then returns 0 real classes after
+    filtering (see point 1), nothing can be done.
 
     **3. All source files are test files.**
     SIEVE skips files in `test/`, `tests/`, `spec/` directories and files named
