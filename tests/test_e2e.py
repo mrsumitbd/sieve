@@ -106,6 +106,57 @@ def _run_with_fake_repo(config, synthetic_repo):
         return run_pipeline(config)
 
 
+def _write_tree(root: Path, files: dict) -> Path:
+    for rel, content in files.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+    return root
+
+
+def _run_on_repos(config, tmp_path, repos, fail_first_clone=()):
+    """
+    Run the pipeline over several fake repos.
+
+    repos maps "owner/name" -> {relative path: file content}. Repos named in
+    fail_first_clone fail their first clone (Pass 1's counting clone) and
+    succeed afterwards. Returns (summary, progress messages).
+    """
+    sources = {
+        name: _write_tree(tmp_path / "fake_repos" / name.replace("/", "__"), files)
+        for name, files in repos.items()
+    }
+    metas = [_make_repo_meta(name) for name in repos]
+    clone_calls = {}
+    messages = []
+
+    def fake_clone(repo_full_name, target_dir):
+        clone_calls[repo_full_name] = clone_calls.get(repo_full_name, 0) + 1
+        if repo_full_name in fail_first_clone and clone_calls[repo_full_name] == 1:
+            return False
+        shutil.copytree(str(sources[repo_full_name]), target_dir, dirs_exist_ok=True)
+        return True
+
+    with patch("sieve.pipeline.discover_repos", return_value=iter(metas)), \
+         patch("sieve.pipeline._clone_repo", side_effect=fake_clone):
+        summary = run_pipeline(config, progress_callback=lambda m, c, t: messages.append(m))
+    return summary, messages
+
+
+def _read_jsonl(summary, key):
+    path = summary["output_paths"].get(key)
+    if path is None:
+        return []
+    return [json.loads(line) for line in Path(path).read_text().splitlines() if line]
+
+
+def _per_repo(records):
+    counts = {}
+    for r in records:
+        counts[r["repo"]] = counts.get(r["repo"], 0) + 1
+    return counts
+
+
 # ─── Tests ────────────────────────────────────────────────────────────────────
 
 class TestPipelineSummaryShape:
@@ -151,24 +202,17 @@ class TestPipelineOutputFiles:
 
 class TestPipelineDeduplication:
     def test_dedup_reduces_count(self, tmp_path, synthetic_repo):
-        """Duplicate files across two fake repos should be deduplicated."""
-        config_no_dedup = SIEVEConfig(
-            language="Python",
-            start_date=date(2024, 1, 1),
-            end_date=date(2025, 1, 1),
-            deduplicate=False,
-            output_dir=str(tmp_path / "no_dedup"),
-        )
-        config_dedup = SIEVEConfig(
-            language="Python",
-            start_date=date(2024, 1, 1),
-            end_date=date(2025, 1, 1),
-            deduplicate=True,
-            dedup_threshold=0.8,
-            output_dir=str(tmp_path / "dedup"),
-        )
+        """The same code in two repos is kept once with dedup on, twice with it off."""
+        def cfg(dedup, out):
+            return SIEVEConfig(
+                language="Python",
+                start_date=date(2024, 1, 1),
+                end_date=date(2025, 1, 1),
+                deduplicate=dedup,
+                dedup_threshold=0.8,
+                output_dir=str(tmp_path / out),
+            )
 
-        # Two repos with identical code
         meta1 = _make_repo_meta("owner/repo1")
         meta2 = _make_repo_meta("owner/repo2")
 
@@ -178,13 +222,118 @@ class TestPipelineDeduplication:
 
         with patch("sieve.pipeline.discover_repos", return_value=iter([meta1, meta2])), \
              patch("sieve.pipeline._clone_repo", side_effect=fake_clone):
-            summary_no_dedup = run_pipeline(config_no_dedup)
+            summary_no_dedup = run_pipeline(cfg(False, "no_dedup"))
 
         with patch("sieve.pipeline.discover_repos", return_value=iter([meta1, meta2])), \
              patch("sieve.pipeline._clone_repo", side_effect=fake_clone):
-            summary_dedup = run_pipeline(config_dedup)
+            summary_dedup = run_pipeline(cfg(True, "dedup"))
 
-        assert summary_dedup["total_functions"] <= summary_no_dedup["total_functions"]
+        # synthetic_repo holds 3 functions (count_lines, FileReader.__init__,
+        # FileReader.read) and 1 class (FileReader); both repos are identical.
+        assert summary_no_dedup["total_functions"] == 6
+        assert summary_no_dedup["total_classes"] == 2
+        assert summary_dedup["total_functions"] == 3
+        assert summary_dedup["total_classes"] == 1
+
+
+# Near-duplicate fixtures. Jaccard similarity of the token sets (identifiers
+# and punctuation, string literals collapsed), computed independently of
+# sieve's tokenizer:
+#   total_price ~ total_cost      0.58   (renamed identifiers only)
+#   binary_search vs either       0.23
+#   ServerSettings ~ ClientSettings  0.60
+#   Matrix vs either              0.13
+_DEDUP_MODULE = '''\
+def total_price(items, tax_rate):
+    subtotal = 0
+    for item in items:
+        subtotal += item.price * item.quantity
+    return subtotal * (1 + tax_rate)
+
+
+def binary_search(arr, target):
+    lo, hi = 0, len(arr) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return -1
+
+
+def total_cost(entries, vat):
+    amount = 0
+    for entry in entries:
+        amount += entry.price * entry.quantity
+    return amount * (1 + vat)
+
+
+class ServerSettings:
+    host = "localhost"
+    port = 8080
+    timeout = 30
+    retries = 3
+    verbose = False
+
+
+class Matrix:
+    rows = []
+    cols = None
+    shape = (0, 0)
+    dtype = float
+
+
+class ClientSettings:
+    hostname = "localhost"
+    port = 8080
+    timeout = 30
+    attempts = 3
+    verbose = False
+'''
+
+
+class TestPipelineDedupWiring:
+    def _run(self, tmp_path, deduplicate, threshold):
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            deduplicate=deduplicate,
+            dedup_threshold=threshold,
+            output_dir=str(tmp_path / "out"),
+        )
+        summary, _ = _run_on_repos(
+            config, tmp_path, {"owner/repo": {"mod.py": _DEDUP_MODULE}}
+        )
+        names = lambda key, field: [r[field] for r in _read_jsonl(summary, key)]
+        return (
+            sorted(names("functions_jsonl", "func_name")),
+            sorted(names("classes_jsonl", "class_name")),
+            summary,
+        )
+
+    def test_dedup_off_keeps_near_duplicates(self, tmp_path):
+        funcs, classes, summary = self._run(tmp_path, deduplicate=False, threshold=0.4)
+        assert funcs == ["binary_search", "total_cost", "total_price"]
+        assert classes == ["ClientSettings", "Matrix", "ServerSettings"]
+        assert (summary["total_functions"], summary["total_classes"]) == (3, 3)
+
+    def test_dedup_on_drops_later_near_duplicate(self, tmp_path):
+        # threshold 0.4 is below both near-duplicate pairs (0.58, 0.60) and
+        # above every distinct pair (<= 0.23): the first of each pair survives.
+        funcs, classes, summary = self._run(tmp_path, deduplicate=True, threshold=0.4)
+        assert funcs == ["binary_search", "total_price"]
+        assert classes == ["Matrix", "ServerSettings"]
+        assert (summary["total_functions"], summary["total_classes"]) == (2, 2)
+
+    def test_strict_threshold_keeps_what_lenient_threshold_drops(self, tmp_path):
+        # threshold 0.95 is above both near-duplicate pairs, so nothing is dropped.
+        funcs, classes, _ = self._run(tmp_path, deduplicate=True, threshold=0.95)
+        assert funcs == ["binary_search", "total_cost", "total_price"]
+        assert classes == ["ClientSettings", "Matrix", "ServerSettings"]
 
 
 class TestPipelineRepoStats:
@@ -399,7 +548,7 @@ class TestTwoPassExtraction:
         assert summary["total_functions"] > 0
 
     def test_two_repos_stratified_allocation(self, tmp_path, synthetic_repo, tmp_repo):
-        """With two repos and a function cap, both repos should contribute."""
+        """With two repos and a function cap, both repos contribute."""
         import shutil
 
         repo2 = tmp_repo({
@@ -427,62 +576,134 @@ class TestTwoPassExtraction:
              patch("sieve.pipeline._clone_repo", side_effect=fake_clone):
             summary = run_pipeline(config)
 
-        assert summary["total_functions"] <= 2
+        # repo1 has 3 functions (count_lines, __init__, read), repo2 has 2.
+        # Cap 2 with 2 non-empty repos: each gets its guaranteed 1, nothing extra.
         assert summary["total_repos_processed"] == 2
+        assert _per_repo(_read_jsonl(summary, "functions_jsonl")) == {
+            "owner/repo1": 1, "owner/repo2": 1,
+        }
+
+
+def _n_functions(n: int) -> dict:
+    return {"mod.py": "".join(f"def f{i}():\n    return {i}\n\n" for i in range(n))}
+
+
+class TestStratifiedAllocationEndToEnd:
+    """
+    Per-repo record counts produced by the whole pipeline for repos of
+    different sizes. Expected values follow from proportional allocation with
+    a guaranteed 1 per non-empty repo (largest remainder for the rest):
+
+      sizes (6, 2), cap 4:  each repo gets 1, extra 2 shared by spare 5 : 1
+                            -> 1 + 10/6 and 1 + 2/6 -> floors 2 and 1,
+                            one leftover unit goes to the larger remainder
+                            (4/6 vs 2/6) -> 3 and 1.
+      sizes (2, 6), cap 4:  the same by symmetry -> 1 and 3.
+    """
+
+    @pytest.mark.parametrize("repo_sizes", [
+        [("owner/big", 6), ("owner/small", 2)],
+        [("owner/small", 2), ("owner/big", 6)],
+    ])
+    def test_exact_per_repo_counts(self, tmp_path, repo_sizes):
+        repos = {name: _n_functions(n) for name, n in repo_sizes}
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=4,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+
+        summary, _ = _run_on_repos(config, tmp_path, repos)
+
+        assert summary["total_functions"] == 4
+        assert _per_repo(_read_jsonl(summary, "functions_jsonl")) == {
+            "owner/big": 3, "owner/small": 1,
+        }
+
+    def test_first_repo_does_not_take_whole_cap(self, tmp_path):
+        repos = {"owner/first": _n_functions(6), "owner/second": _n_functions(6)}
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=4,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+
+        summary, _ = _run_on_repos(config, tmp_path, repos)
+
+        # Equal repos split the cap evenly.
+        assert _per_repo(_read_jsonl(summary, "functions_jsonl")) == {
+            "owner/first": 2, "owner/second": 2,
+        }
 
 
 # ─── LLM score annotation ─────────────────────────────────────────────────────
 
 class TestLLMScoreAnnotation:
-    def test_annotate_llm_score_calls_classifier(self, tmp_path, synthetic_repo):
-        from unittest.mock import patch, MagicMock
+    _REPOS = {"owner/repo": {"mod.py": _PYTHON_CODE}}
 
-        config = SIEVEConfig(
+    @staticmethod
+    def _score(snippets, batch_size=64):
+        # Score depends only on the snippet, so a record carrying another
+        # record's score is detectable.
+        return [len(snippet) / 1000 for snippet in snippets]
+
+    def _config(self, tmp_path, annotate):
+        return SIEVEConfig(
             language="Python",
             start_date=date(2024, 1, 1),
             end_date=date(2025, 1, 1),
-            annotate_llm_score=True,
+            annotate_llm_score=annotate,
             deduplicate=False,
             output_dir=str(tmp_path / "out"),
         )
 
-        mock_clf_instance = MagicMock()
-        mock_clf_instance.score_batch.return_value = [0.5, 0.3, 0.8, 0.1, 0.9]
+    def _records(self, summary):
+        records = _read_jsonl(summary, "functions_jsonl") + _read_jsonl(summary, "classes_jsonl")
+        # _PYTHON_CODE: count_lines, FileReader.__init__, FileReader.read + class FileReader
+        assert len(records) == 4
+        return records
+
+    def test_enabled_scores_every_record_with_its_own_score(self, tmp_path):
+        classifier = MagicMock()
+        classifier.score_batch.side_effect = self._score
 
         with patch("sieve.models.classifier.LLMCodeClassifier.load",
-                   return_value=mock_clf_instance):
-            summary = _run_with_fake_repo(config, synthetic_repo)
+                   return_value=classifier):
+            summary, _ = _run_on_repos(self._config(tmp_path, True), tmp_path, self._REPOS)
 
-        assert "total_functions" in summary
+        for record in self._records(summary):
+            assert record["llm_score"] == len(record["source_code"]) / 1000
 
-    def test_annotate_llm_score_failure_continues(self, tmp_path, synthetic_repo):
-        from unittest.mock import patch
+    def test_disabled_leaves_scores_unset_and_never_loads_model(self, tmp_path):
+        with patch("sieve.models.classifier.LLMCodeClassifier.load") as load:
+            summary, _ = _run_on_repos(self._config(tmp_path, False), tmp_path, self._REPOS)
 
-        config = SIEVEConfig(
-            language="Python",
-            start_date=date(2024, 1, 1),
-            end_date=date(2025, 1, 1),
-            annotate_llm_score=True,
-            deduplicate=False,
-            output_dir=str(tmp_path / "out"),
-        )
+        load.assert_not_called()
+        assert all(r["llm_score"] is None for r in self._records(summary))
 
+    def test_model_load_failure_continues_without_scores(self, tmp_path):
         with patch("sieve.models.classifier.LLMCodeClassifier.load",
                    side_effect=Exception("Model unavailable")):
-            summary = _run_with_fake_repo(config, synthetic_repo)
+            summary, messages = _run_on_repos(self._config(tmp_path, True), tmp_path, self._REPOS)
 
-        assert "total_functions" in summary
+        assert all(r["llm_score"] is None for r in self._records(summary))
+        assert any("LLM scoring failed" in m and "Model unavailable" in m for m in messages)
 
 
 # ─── Phase 4b: final safety-net cap (NOT Pass 3 — separate mechanism) ────────
-# This lived under `TestPass3Shortfall` before, mislabeled: its own docstring
-# names "Phase 4b safety-net caps" (pipeline.py lines 538-552), a final
-# _stratified_sample() truncation that runs *after* Pass 3, independent of
-# it. Moved here under its own name so it isn't mistaken for Pass 3 coverage.
+# Phase 4b (pipeline.py "Final corpus size caps") is a final _stratified_sample()
+# truncation that runs *after* Pass 3, independent of it.
 
 class TestFinalCapEnforcement:
     def test_final_cap_applied_when_overshoot(self, tmp_path, synthetic_repo):
-        """Phase 4b safety-net caps fire when per-repo extraction slightly overshoots."""
+        """Caps hold end to end. (Phase 4b itself is exercised in TestPhase4bSafetyNet:
+        this scenario never overshoots, so that code is not reached here.)"""
         config = SIEVEConfig(
             language="Python",
             start_date=date(2024, 1, 1),
@@ -495,6 +716,62 @@ class TestFinalCapEnforcement:
         summary = _run_with_fake_repo(config, synthetic_repo)
         assert summary["total_functions"] <= 1
         assert summary["total_classes"] <= 1
+
+
+class TestPhase4bSafetyNet:
+    """
+    A repo whose Pass 1 counting clone fails (a transient error) has no
+    allocation, so Pass 2 extracts it uncapped and the corpus overshoots the
+    cap. Phase 4b must trim it back, proportionally by repo.
+
+    Setup: repo1 (3 functions, 1 class) is counted in Pass 1; repo2
+    (5 functions, 3 attribute-only classes) fails that first clone.
+      functions: cap 2 -> repo1 allocated 2, repo2 uncapped 5      => 7 > 2
+        trim 7 -> 2: repo1 2*2/7 = 0.57, repo2 2*5/7 = 1.43. repo2 takes its
+        floor 1, the leftover slot goes to the larger remainder (repo1 0.57
+        vs repo2 0.43) -> repo1 1, repo2 1.
+      classes:   cap 1 -> repo1 allocated 1, repo2 uncapped 3      => 4 > 1
+        trim 4 -> 1: repo1 1*1/4 = 0.25, repo2 1*3/4 = 0.75, no floors;
+        the one slot goes to repo2.
+    """
+
+    _REPOS = {
+        "owner/repo1": {"mod.py": _PYTHON_CODE},
+        "owner/repo2": {
+            "mod.py": "".join(f"def g{i}():\n    return {i}\n\n" for i in range(5))
+                      + "".join(f"class C{i}:\n    x = {i}\n\n" for i in range(3)),
+        },
+    }
+
+    def _run(self, tmp_path):
+        config = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            max_functions=2,
+            max_classes=1,
+            deduplicate=False,
+            output_dir=str(tmp_path / "out"),
+        )
+        return _run_on_repos(
+            config, tmp_path, self._REPOS, fail_first_clone={"owner/repo2"}
+        )
+
+    def test_overshoot_is_trimmed_to_cap_proportionally(self, tmp_path):
+        summary, _ = self._run(tmp_path)
+
+        assert summary["total_functions"] == 2
+        assert summary["total_classes"] == 1
+        assert _per_repo(_read_jsonl(summary, "functions_jsonl")) == {
+            "owner/repo1": 1, "owner/repo2": 1,
+        }
+        assert _per_repo(_read_jsonl(summary, "classes_jsonl")) == {"owner/repo2": 1}
+
+    def test_trim_is_reported(self, tmp_path):
+        _, messages = self._run(tmp_path)
+
+        assert "Applying final function cap: 7 → 2" in messages
+        assert "Applying final class cap: 4 → 1" in messages
 
 
 # ─── Pass 3 shortfall redistribution ─────────────────────────────────────────

@@ -86,13 +86,6 @@ class TestLoad:
             LLMCodeClassifier.load(artifacts_dir)
             mock_load.assert_called_once()
 
-    def test_load_calls_internal_load(self, tmp_path):
-        clf = _make_classifier(tmp_path)
-        with patch.object(clf, "_load") as mock_load:
-            with patch.object(clf, "is_available", return_value=True):
-                clf._load = mock_load
-                mock_load.assert_not_called()
-
     def test_default_model_dir_used_when_none(self, tmp_path):
         from sieve.models.classifier import LLMCodeClassifier, _DEFAULT_MODEL_DIR
         if (_DEFAULT_MODEL_DIR / "best_model.pt").exists():
@@ -118,19 +111,14 @@ class TestScore:
         assert isinstance(result, float)
         assert result == 0.85
 
-    def test_score_returns_none_for_empty_string(self, tmp_path):
+    @pytest.mark.parametrize("code", ["", "   ", "\n\t ", None])
+    def test_score_returns_none_for_blank_input_without_scoring(self, tmp_path, code):
         clf = _make_classifier(tmp_path)
         clf._loaded = True
-        clf.score_batch = MagicMock(return_value=[None])
-        result = clf.score("")
-        assert result is None
-
-    def test_score_returns_none_for_whitespace(self, tmp_path):
-        clf = _make_classifier(tmp_path)
-        clf._loaded = True
-        clf.score_batch = MagicMock(return_value=[None])
-        result = clf.score("   ")
-        assert result is None
+        # If the guard in score() were missing, this value would leak out.
+        clf.score_batch = MagicMock(return_value=[0.9])
+        assert clf.score(code) is None
+        clf.score_batch.assert_not_called()
 
     def test_score_delegates_to_score_batch(self, tmp_path):
         clf = self._clf_with_mock_batch(tmp_path, [0.42])
@@ -277,36 +265,6 @@ class TestPipelinePhase5:
             end_line=1,
         )
 
-    def test_llm_score_populated_when_annotate_enabled(self, tmp_path):
-        """When annotate_llm_score=True and artifacts exist, records get scores."""
-        from unittest.mock import MagicMock
-        from sieve.models.classifier import LLMCodeClassifier
-
-        func = self._make_function_record()
-        cls  = self._make_class_record()
-
-        mock_clf = MagicMock(spec=LLMCodeClassifier)
-        mock_clf.is_available.return_value = True
-        mock_clf.score_batch.return_value  = [0.85, 0.12]
-
-        # Simulate Phase 5 directly — patch at source module level
-        with patch("sieve.models.classifier.LLMCodeClassifier", return_value=mock_clf):
-            all_records = [func, cls]
-            snippets    = [r.source_code for r in all_records]
-            scores      = mock_clf.score_batch(snippets)
-            for record, score in zip(all_records, scores):
-                record.llm_score = score
-
-        assert func.llm_score == 0.85
-        assert cls.llm_score  == 0.12
-
-    def test_llm_score_none_when_artifacts_missing(self, tmp_path):
-        """When artifacts are missing, llm_score stays None."""
-        func = self._make_function_record()
-        cls  = self._make_class_record()
-        assert func.llm_score is None
-        assert cls.llm_score  is None
-
     def test_llm_score_field_exists_on_function_record(self):
         func = self._make_function_record()
         assert hasattr(func, "llm_score")
@@ -316,22 +274,3 @@ class TestPipelinePhase5:
         cls = self._make_class_record()
         assert hasattr(cls, "llm_score")
         assert cls.llm_score is None
-
-    def test_score_batch_called_with_all_source_codes(self):
-        from unittest.mock import MagicMock
-        from sieve.models.classifier import LLMCodeClassifier
-
-        func = self._make_function_record()
-        cls  = self._make_class_record()
-
-        mock_clf = MagicMock(spec=LLMCodeClassifier)
-        mock_clf.score_batch.return_value = [0.5, 0.5]
-
-        all_records = [func, cls]
-        snippets    = [r.source_code for r in all_records]
-        mock_clf.score_batch(snippets, batch_size=64)
-
-        mock_clf.score_batch.assert_called_once_with(
-            [func.source_code, cls.source_code],
-            batch_size=64,
-        )

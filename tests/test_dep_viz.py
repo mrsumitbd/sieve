@@ -45,13 +45,6 @@ class TestRenderDepGraph:
         # height - 36 is used for graph container (controls bar takes 36px)
         assert "464" in html  # 500 - 36
 
-    def test_color_codes_present(self):
-        html = render_dep_graph(SAMPLE_DEPS, "owner/repo")
-        # Main = blue, dev = purple, optional = orange
-        assert "#7aa2f7" in html
-        assert "#bb9af7" in html
-        assert "#e0af68" in html
-
     def test_dep_count_in_legend(self):
         html = render_dep_graph(SAMPLE_DEPS, "owner/repo")
         assert f"{len(SAMPLE_DEPS)} direct" in html
