@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the paper below."
+title: "SIEVE: A Parameterized GitHub Corpus Builder for Software Engineering Research"
+type: software
+authors:
+  - family-names: Rahman
+    given-names: Musfiqur
+    affiliation: "Concordia University"
+  - family-names: Begoug
+    given-names: Mahi
+    affiliation: "Concordia University"
+  - family-names: Shihab
+    given-names: Emad
+    affiliation: "Concordia University"
+repository-code: "https://github.com/mrsumitbd/sieve"
+url: "https://mrahman2025-sieve.hf.space"
+license: MIT
+version: 0.1.0
+keywords:
+  - code corpus
+  - large language models
+  - software engineering
+  - GitHub mining
+preferred-citation:
+  type: article
+  title: "SIEVE: A Parameterized GitHub Corpus Builder for Software Engineering Research"
+  authors:
+    - family-names: Rahman
+      given-names: Musfiqur
+      affiliation: "Concordia University"
+    - family-names: Begoug
+      given-names: Mahi
+      affiliation: "Concordia University"
+    - family-names: Shihab
+      given-names: Emad
+      affiliation: "Concordia University"
+  journal: "arXiv preprint arXiv:2610.22544"
+  year: 2026
+  url: "https://arxiv.org/abs/2610.22544"

@@ -403,14 +403,12 @@ with st.expander("How do I cite SIEVE?"):
     If you use SIEVE in your research, please cite:
 
     ```bibtex
-    @inproceedings{rahman2027sieve,
-      title     = {{SIEVE}: A Parameterized GitHub Corpus Builder for
-                   Software Engineering Research},
-      author    = {Rahman, Musfiqur and Begoug, Mahi and Shihab, Emad},
-      booktitle = {Proceedings of the 24th International Conference on
-                   Mining Software Repositories (MSR)},
-      year      = {2027}
+    @article{rahman2026sieve,
+      title={SIEVE: A Parameterized GitHub Corpus Builder for Software Engineering Research},
+      author={Rahman, Musfiqur and Begoug, Mahi and Shihab, Emad},
+      journal={arXiv preprint arXiv:2610.22544},
+      year={2026}
     }
     ```
-    *(Citation will be updated upon publication.)*
+    The same citation is also available in the repository's `CITATION.cff` file.
     """)

@@ -16,7 +16,6 @@ pinned: false
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![Languages](https://img.shields.io/badge/languages-Python%20%7C%20Java%20%7C%20JavaScript%20%7C%20C%2B%2B-orange?style=flat-square)
-![Venue](https://img.shields.io/badge/venue-MSR%202027%20Dublin-blueviolet?style=flat-square)
 
 SIEVE is a parameterized GitHub corpus builder for software engineering research. It lets you curate high-quality code datasets from public repositories with full control over language, recency, repository quality, and extraction granularity — for LLM evaluation, dependency analysis, structural studies of AI-generated code, or general-purpose corpus building.
 
@@ -290,5 +289,12 @@ The suite covers unit, integration, and end-to-end levels. GitHub and git are mo
 If you use SIEVE in your research, please cite:
 
 ```bibtex
-TBA
+@article{rahman2026sieve,
+  title={SIEVE: A Parameterized GitHub Corpus Builder for Software Engineering Research},
+  author={Rahman, Musfiqur and Begoug, Mahi and Shihab, Emad},
+  journal={arXiv preprint arXiv:2610.22544},
+  year={2026}
+}
 ```
+
+GitHub's **Cite this repository** button gives the same citation, generated from [`CITATION.cff`](CITATION.cff).
