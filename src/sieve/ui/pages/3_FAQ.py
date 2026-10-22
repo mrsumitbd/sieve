@@ -400,17 +400,7 @@ st.subheader("Citation")
 
 with st.expander("How do I cite SIEVE?"):
     st.markdown("""
-    If you use SIEVE in your research, please cite:
-
-    ```bibtex
-    @inproceedings{rahman2027sieve,
-      title     = {{SIEVE}: A Parameterized GitHub Corpus Builder for
-                   Software Engineering Research},
-      author    = {Rahman, Musfiqur and Begoug, Mahi and Shihab, Emad},
-      booktitle = {Proceedings of the 24th International Conference on
-                   Mining Software Repositories (MSR)},
-      year      = {2027}
-    }
-    ```
-    *(Citation will be updated upon publication.)*
+    To cite SIEVE, use the metadata in the repository's `CITATION.cff` file.
+    On the [GitHub repository](https://github.com/mrsumitbd/sieve), the
+    **Cite this repository** button produces a ready-to-use citation.
     """)
