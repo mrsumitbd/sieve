@@ -275,7 +275,7 @@ pytest
 pytest --cov=sieve --cov-report=term-missing
 ```
 
-The suite covers 455 tests across unit, integration, and end-to-end levels. GitHub and git are mocked — no network access required.
+The suite covers unit, integration, and end-to-end levels. GitHub and git are mocked — no network access required.
 
 ---
 
