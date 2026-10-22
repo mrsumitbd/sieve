@@ -400,7 +400,15 @@ st.subheader("Citation")
 
 with st.expander("How do I cite SIEVE?"):
     st.markdown("""
-    To cite SIEVE, use the metadata in the repository's `CITATION.cff` file.
-    On the [GitHub repository](https://github.com/mrsumitbd/sieve), the
-    **Cite this repository** button produces a ready-to-use citation.
+    If you use SIEVE in your research, please cite:
+
+    ```bibtex
+    @article{rahman2026sieve,
+      title={SIEVE: A Parameterized GitHub Corpus Builder for Software Engineering Research},
+      author={Rahman, Musfiqur and Begoug, Mahi and Shihab, Emad},
+      journal={arXiv preprint arXiv:2610.22544},
+      year={2026}
+    }
+    ```
+    The same citation is also available in the repository's `CITATION.cff` file.
     """)

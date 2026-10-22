@@ -286,4 +286,15 @@ The suite covers unit, integration, and end-to-end levels. GitHub and git are mo
 
 ## Citation
 
-If you use SIEVE in your research, please cite it using the metadata in [`CITATION.cff`](CITATION.cff). On GitHub, the **Cite this repository** button in the repository sidebar produces ready-to-use citations from that file.
+If you use SIEVE in your research, please cite:
+
+```bibtex
+@article{rahman2026sieve,
+  title={SIEVE: A Parameterized GitHub Corpus Builder for Software Engineering Research},
+  author={Rahman, Musfiqur and Begoug, Mahi and Shihab, Emad},
+  journal={arXiv preprint arXiv:2610.22544},
+  year={2026}
+}
+```
+
+GitHub's **Cite this repository** button gives the same citation, generated from [`CITATION.cff`](CITATION.cff).
