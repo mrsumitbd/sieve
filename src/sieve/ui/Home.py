@@ -629,7 +629,7 @@ if st.session_state.summary:
                 ("Comments",                m.get("comments"),              "Comment lines"),
                 ("Blank",                   m.get("blank"),                 "Blank lines"),
                 ("Comment Ratio",           m.get("comment_ratio"),         "Comment lines / LOC"),
-                ("Cyclomatic Complexity",   m.get("cyclomatic_complexity"), "McCabe: 1 + branching statements"),
+                ("Cyclomatic Complexity",   m.get("cyclomatic_complexity"), "McCabe: 1 + decision points (if, loops, case, catch, ternary, &&/||); see Documentation"),
                 ("Max Nesting Depth",       m.get("max_nesting_depth"),     "Maximum control flow nesting depth"),
                 ("h1 (Distinct Operators)", m.get("h1"),                    "Halstead: distinct operators"),
                 ("h2 (Distinct Operands)",  m.get("h2"),                    "Halstead: distinct operands"),

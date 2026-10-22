@@ -195,6 +195,233 @@ int f(int n) {
         assert self._cc(code, "Python") == 2
 
 
+# Hand-counted McCabe values for every construct the metric counts:
+#   if / else-if, for, for-each, while, do-while, case labels, catch, ?:, && and ||.
+# Rules: each non-default case label adds 1 (empty fall-through labels included),
+# `default` and the switch itself add 0; && / || add 1 per operator occurrence;
+# every other binary operator, instanceof, await and ?? add 0.
+# Expected = 1 + decision points, counted by hand per case below.
+CC_CASES = [
+    # ── Java ──
+    # if: 1+1
+    ("java-if", "Java",
+     "class A { int f(int a){ if (a>0) { return 1; } return 0; } }", 2),
+    # if, else-if (the else branch itself adds 0): 1+2
+    ("java-else-if", "Java",
+     "class A { void f(int a){ if (a>0) { } else if (a<0) { } else { } } }", 3),
+    # && once: 1+1(if)+1(&&)
+    ("java-and-in-if", "Java",
+     "class A { boolean f(int a,int b){ if (a>0 && b>0) { return true; } return false; } }", 3),
+    # || once: 1+1(if)+1(||)
+    ("java-or-in-if", "Java",
+     "class A { boolean f(int a,int b){ if (a>0 || b>0) { return true; } return false; } }", 3),
+    # a && b && c is two operators: 1+2
+    ("java-and-chain", "Java",
+     "class A { boolean f(boolean a,boolean b,boolean c){ return a && b && c; } }", 3),
+    # a && b || c: one && and one ||: 1+2
+    ("java-and-or-mixed", "Java",
+     "class A { boolean f(boolean a,boolean b,boolean c){ return a && b || c; } }", 3),
+    # other binary operators (bitwise &, |, comparison, arithmetic) add 0: 1+0
+    ("java-non-logical-binary", "Java",
+     "class A { boolean f(int a,int b,int c){ return (a & b | c) + a * b > 1; } }", 1),
+    # ternary: 1+1
+    ("java-ternary", "Java",
+     "class A { int f(int n){ return n > 0 ? n : -n; } }", 2),
+    # for: 1+1
+    ("java-for", "Java",
+     "class A { void f(){ for (int i=0;i<3;i++) { } } }", 2),
+    # enhanced for: 1+1
+    ("java-enhanced-for", "Java",
+     "class A { int f(int[] xs){ int s=0; for (int x : xs) { s += x; } return s; } }", 2),
+    # while: 1+1
+    ("java-while", "Java",
+     "class A { void f(){ while (true) { } } }", 2),
+    # do-while: 1+1
+    ("java-do-while", "Java",
+     "class A { void f(){ do { } while (true); } }", 2),
+    # two catch clauses (try and finally add 0): 1+2
+    ("java-catch", "Java",
+     "class A { void f(){ try { } catch (RuntimeException e) { } catch (Error e) { } finally { } } }", 3),
+    # case 1, case 2, default: switch 0, default 0, 2 labels: 1+2
+    ("java-switch", "Java",
+     "class A { void f(int n){ switch (n) { case 1: break; case 2: break; default: break; } } }", 3),
+    # empty fall-through: case 1, case 2 each count (default 0): 1+2
+    ("java-switch-fallthrough", "Java",
+     "class A { void f(int n){ switch (n) { case 1: case 2: break; default: break; } } }", 3),
+    # default only: 1+0
+    ("java-switch-default-only", "Java",
+     "class A { void f(int n){ switch (n) { default: break; } } }", 1),
+    # default first, then case 3: 1+1
+    ("java-switch-default-first", "Java",
+     "class A { void f(int n){ switch (n) { default: case 3: break; } } }", 2),
+    # arrow switch expression: case 1, case 2,3 (one label), default: 1+2
+    ("java-switch-arrow", "Java",
+     "class A { int f(int n){ return switch (n) { case 1 -> 1; case 2, 3 -> 2; default -> 0; }; } }", 3),
+    # `case null, default` is the default label (0); case String s: 1+1
+    ("java-switch-null-default", "Java",
+     "class A { int f(Object o){ return switch (o) { case null, default -> 0; case String s -> 1; }; } }", 2),
+    # instanceof is not a decision point: 1+0
+    ("java-instanceof", "Java",
+     "class A { boolean f(Object o){ return o instanceof String; } }", 1),
+    # for-each, if, &&, ||, else-if, case 1, case 2, case 3, ?:, catch: 1+10
+    ("java-combined", "Java",
+     "class A { int f(int[] xs){ int s=0;"
+     " for (int x : xs) { if (x>0 && x<10 || x==99) { s+=x; } else if (x<0) { s-=x; } }"
+     " switch (s) { case 1: case 2: s++; break; case 3: s--; break; default: break; }"
+     " try { s = s>5 ? s : -s; } catch (Exception e) { s = 0; }"
+     " return s; } }", 11),
+
+    # ── JavaScript ──
+    # if, else-if: 1+2
+    ("js-else-if", "JavaScript",
+     "function f(a){ if (a>0) { } else if (a<0) { } else { } }", 3),
+    # && once: 1+1(if)+1(&&)
+    ("js-and-in-if", "JavaScript",
+     "function f(a,b){ if (a>0 && b>0) { return true; } return false; }", 3),
+    # || once: 1+1(if)+1(||)
+    ("js-or-in-if", "JavaScript",
+     "function f(a,b){ if (a>0 || b>0) { return true; } return false; }", 3),
+    # a && b && c: 1+2
+    ("js-and-chain", "JavaScript",
+     "function f(a,b,c){ return a && b && c; }", 3),
+    # a && b || c: 1+2
+    ("js-and-or-mixed", "JavaScript",
+     "function f(a,b,c){ return a && b || c; }", 3),
+    # ?? , &&=, ||=, bitwise and arithmetic operators add 0: 1+0
+    ("js-non-counted-operators", "JavaScript",
+     "function f(a,b){ a ||= b; a &&= b; return (a ?? b) & (a | b) + 1; }", 1),
+    # ternary: 1+1
+    ("js-ternary", "JavaScript",
+     "function f(n){ return n > 0 ? n : -n; }", 2),
+    # for: 1+1
+    ("js-for", "JavaScript",
+     "function f(){ for (let i=0;i<3;i++) { } }", 2),
+    # for-in: 1+1
+    ("js-for-in", "JavaScript",
+     "function f(o){ for (const k in o) { } }", 2),
+    # for-of: 1+1
+    ("js-for-of", "JavaScript",
+     "function f(o){ for (const k of o) { } }", 2),
+    # while: 1+1
+    ("js-while", "JavaScript",
+     "function f(){ while (true) { } }", 2),
+    # do-while: 1+1
+    ("js-do-while", "JavaScript",
+     "function f(){ do { } while (true); }", 2),
+    # catch: 1+1 (finally adds 0)
+    ("js-catch", "JavaScript",
+     "function f(){ try { } catch (e) { } finally { } }", 2),
+    # case 1, case 2, default: 1+2
+    ("js-switch", "JavaScript",
+     "function f(n){ switch (n) { case 1: break; case 2: break; default: break; } }", 3),
+    # empty fall-through: case 1, case 2: 1+2
+    ("js-switch-fallthrough", "JavaScript",
+     "function f(n){ switch (n) { case 1: case 2: break; default: break; } }", 3),
+    # default only: 1+0
+    ("js-switch-default-only", "JavaScript",
+     "function f(n){ switch (n) { default: break; } }", 1),
+    # await is not a decision point: 1+0
+    ("js-await", "JavaScript",
+     "async function f(){ await g(); await h(); }", 1),
+    # for-of, if, &&, ||, else-if, case 1, case 2, case 3, ?:, catch (await adds 0): 1+10
+    ("js-combined", "JavaScript",
+     "async function f(xs){ let s=0;"
+     " for (const x of xs) { if (x>0 && x<10 || x===99) { s+=x; } else if (x<0) { s-=x; } }"
+     " switch (s) { case 1: case 2: s++; break; case 3: s--; break; default: break; }"
+     " try { s = s>5 ? s : -s; await g(); } catch (e) { s = 0; }"
+     " return s; }", 11),
+
+    # ── C++ ──
+    # if, else-if: 1+2
+    ("cpp-else-if", "C++",
+     "void f(int a){ if (a>0) { } else if (a<0) { } else { } }", 3),
+    # && once: 1+1(if)+1(&&)
+    ("cpp-and-in-if", "C++",
+     "bool f(int a,int b){ if (a>0 && b>0) { return true; } return false; }", 3),
+    # || once: 1+1(if)+1(||)
+    ("cpp-or-in-if", "C++",
+     "bool f(int a,int b){ if (a>0 || b>0) { return true; } return false; }", 3),
+    # a && b && c: 1+2
+    ("cpp-and-chain", "C++",
+     "bool f(bool a,bool b,bool c){ return a && b && c; }", 3),
+    # a && b || c: 1+2
+    ("cpp-and-or-mixed", "C++",
+     "bool f(bool a,bool b,bool c){ return a && b || c; }", 3),
+    # alternative tokens `and` / `or` are the same operators: 1+2
+    ("cpp-and-or-keywords", "C++",
+     "bool f(bool a,bool b,bool c){ return a and b or c; }", 3),
+    # bitwise &, |, comparison, arithmetic add 0: 1+0
+    ("cpp-non-logical-binary", "C++",
+     "int f(int a,int b,int c){ return (a & b | c) + a * b; }", 1),
+    # ternary: 1+1
+    ("cpp-ternary", "C++",
+     "int f(int n){ return n > 0 ? n : -n; }", 2),
+    # for: 1+1
+    ("cpp-for", "C++",
+     "void f(){ for (int i=0;i<3;i++) { } }", 2),
+    # range-for: 1+1
+    ("cpp-range-for", "C++",
+     "int f(std::vector<int> v){ int s=0; for (auto x : v) { s += x; } return s; }", 2),
+    # while: 1+1
+    ("cpp-while", "C++",
+     "void f(){ while (true) { } }", 2),
+    # do-while: 1+1
+    ("cpp-do-while", "C++",
+     "void f(){ do { } while (true); }", 2),
+    # two catch clauses, one of them catch(...): 1+2
+    ("cpp-catch", "C++",
+     "void f(){ try { } catch (const std::exception& e) { } catch (...) { } }", 3),
+    # case 1, case 2, default: 1+2
+    ("cpp-switch", "C++",
+     "void f(int n){ switch (n) { case 1: break; case 2: break; default: break; } }", 3),
+    # empty fall-through: case 1, case 2: 1+2
+    ("cpp-switch-fallthrough", "C++",
+     "void f(int n){ switch (n) { case 1: case 2: break; default: break; } }", 3),
+    # default only: 1+0
+    ("cpp-switch-default-only", "C++",
+     "void f(int n){ switch (n) { default: break; } }", 1),
+    # default first, then case 1: 1+1
+    ("cpp-switch-default-first", "C++",
+     "void f(int n){ switch (n) { default: case 1: n++; break; } }", 2),
+    # range-for, if, &&, ||, else-if, case 1, case 2, case 3, ?:, catch: 1+10
+    ("cpp-combined", "C++",
+     "int f(std::vector<int> xs){ int s=0;"
+     " for (auto x : xs) { if (x>0 && x<10 || x==99) { s+=x; } else if (x<0) { s-=x; } }"
+     " switch (s) { case 1: case 2: s++; break; case 3: s--; break; default: break; }"
+     " try { s = s>5 ? s : -s; } catch (const std::exception& e) { s = 0; }"
+     " return s; }", 11),
+
+    # ── Python control (the Python path must not change) ──
+    # and in if: 1+1(if)+1(and)
+    ("py-and-in-if", "Python",
+     "def f(a,b):\n    if a>0 and b>0:\n        return True\n    return False\n", 3),
+    # a and b and c: two boolean operators: 1+2
+    ("py-and-chain", "Python",
+     "def f(a,b,c):\n    return a and b and c\n", 3),
+    # if, elif, for, while, except, ternary, list comprehension, or: 1+8
+    ("py-combined", "Python",
+     "def f(a, xs):\n"
+     "    if a:\n        pass\n    elif xs:\n        pass\n"
+     "    for x in xs:\n        pass\n"
+     "    while a:\n        a -= 1\n"
+     "    try:\n        pass\n    except Exception:\n        pass\n"
+     "    y = 1 if a else 2\n"
+     "    z = [i for i in xs]\n"
+     "    return a or y\n", 9),
+]
+
+
+class TestCyclomaticComplexityPerConstruct:
+    @pytest.mark.parametrize(
+        "language,source,expected",
+        [(lang, src, exp) for _, lang, src, exp in CC_CASES],
+        ids=[name for name, *_ in CC_CASES],
+    )
+    def test_hand_counted(self, language, source, expected):
+        root = _get_tree(source, language).root_node
+        assert _cyclomatic_complexity(root, language) == expected
+
+
 # ─── _max_nesting_depth ───────────────────────────────────────────────────────
 
 class TestMaxNestingDepth:

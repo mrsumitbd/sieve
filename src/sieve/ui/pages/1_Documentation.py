@@ -503,8 +503,26 @@ across all four supported languages.
 
 | Metric | Description |
 |--------|-------------|
-| `cyclomatic_complexity` | McCabe complexity: 1 + number of branching statements (if/elif, for, while, except, logical &&/\\|\\|, comprehensions) |
+| `cyclomatic_complexity` | McCabe complexity: 1 + number of decision points. Which constructs count depends on the language; see the table below. |
 | `max_nesting_depth` | Maximum depth of nested control flow structures (if, for, while, try, with) |
+
+**Decision points counted in `cyclomatic_complexity` (+1 each):**
+
+| Language | Counted |
+|----------|---------|
+| Python | `if`, `elif`, `for`, `while`, `except`, `with`, `assert`, each `and` / `or`, conditional expressions (`x if c else y`), each list / set / dict comprehension and generator expression |
+| Java | `if` (an `else if` counts as its own `if`), `for`, enhanced `for` (for-each), `while`, `do-while`, each `catch`, ternary `?:`, each `&&` and `\\|\\|`, each non-default `case` label |
+| JavaScript | `if` (including `else if`), `for`, `for-in`, `for-of`, `while`, `do-while`, each `catch`, ternary `?:`, each `&&` and `\\|\\|`, each non-default `case` |
+| C++ | `if` (including `else if`), `for`, range-based `for`, `while`, `do-while`, each `catch`, ternary `?:`, each `&&` / `and` and `\\|\\|` / `or`, each non-default `case` label |
+
+For Java, JavaScript and C++: `&&` and `||` are counted per operator, so
+`a && b && c` adds 2. Every `case` label counts, including empty fall-through
+labels (`case 1: case 2:` adds 2), while `default` and the `switch` statement
+itself add 0. A Java `case 2, 3 ->` is a single label and adds 1, and
+`case null, default` is treated as the default label. Not counted in these
+three languages: `else`, `default`, `switch`, `try`, `finally`, `return`,
+`instanceof`, `await`, `??`, `&&=`, `||=`, and all other binary operators.
+Python `match` / `case` is not counted.
 
 #### Halstead Metrics
 
