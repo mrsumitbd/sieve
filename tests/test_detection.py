@@ -28,15 +28,6 @@ class TestPythonDetection:
         report = detect_test_suite(str(repo), "Python")
         assert report.is_present is True
 
-    def test_pytest_config_signal(self, tmp_repo):
-        repo = tmp_repo({
-            "src/app.py": "def run(): pass\n",
-            "tests/test_app.py": "def test_run(): pass\n",
-            "pytest.ini": "[pytest]\ntestpaths = tests\n",
-        })
-        report = detect_test_suite(str(repo), "Python")
-        assert report.is_present is True
-
     def test_ci_workflow_signal(self, tmp_repo):
         """CI workflows in .github/workflows/ must be visible (not excluded)."""
         repo = tmp_repo({

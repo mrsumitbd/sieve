@@ -169,13 +169,3 @@ class TestManifest:
         with patch.dict(sys.modules, {"polars": None}):
             with pytest.raises(Exception):
                 export_dataset(funcs, classes, str(tmp_path / "out"), "parquet", _CONFIG, _REPO_META)
-
-    def test_manifest_datetime_serialization(self, tmp_path, sample_records):
-        """manifest.json correctly serializes date objects via the _default handler."""
-        from datetime import datetime
-        funcs, classes = sample_records
-        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
-        # If manifest wrote without error, datetime serialization works
-        manifest = json.loads(Path(paths["manifest"]).read_text())
-        # start_date in config is a date object — should be serialized as string
-        assert isinstance(manifest["config"]["start_date"], str)

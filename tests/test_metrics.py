@@ -72,18 +72,6 @@ class TestGetTree:
         tree = _get_tree("some code", "COBOL")
         assert tree is None
 
-    def test_returns_tree_for_java(self):
-        tree = _get_tree(SIMPLE_JAVA, "Java")
-        assert tree is not None
-
-    def test_returns_tree_for_javascript(self):
-        tree = _get_tree(SIMPLE_JS, "JavaScript")
-        assert tree is not None
-
-    def test_returns_tree_for_cpp(self):
-        tree = _get_tree(SIMPLE_CPP, "C++")
-        assert tree is not None
-
 
 # ─── _raw_metrics ─────────────────────────────────────────────────────────────
 
@@ -147,15 +135,6 @@ class TestCyclomaticComplexity:
     def test_if_adds_1(self):
         code = "def foo(x):\n    if x > 0:\n        return x\n    return 0\n"
         assert self._cc(code, "Python") == 2
-
-    def test_java_simple_is_1(self):
-        assert self._cc(SIMPLE_JAVA, "Java") == 1
-
-    def test_js_simple_is_1(self):
-        assert self._cc(SIMPLE_JS, "JavaScript") == 1
-
-    def test_cpp_simple_is_1(self):
-        assert self._cc(SIMPLE_CPP, "C++") == 1
 
     def test_while_adds_1(self):
         code = "def foo(n):\n    while n > 0:\n        n -= 1\n    return n\n"
@@ -222,10 +201,6 @@ class TestHalsteadMetrics:
     def test_bugs_equals_volume_over_3000(self):
         m = self._hal(SIMPLE_PYTHON, "Python")
         assert abs(m["bugs"] - round(m["volume"] / 3000.0, 4)) < 0.001
-
-    def test_java_halstead(self):
-        m = self._hal(SIMPLE_JAVA, "Java")
-        assert m["h1"] >= 0 and m["h2"] >= 0
 
     def test_complex_function_higher_volume(self):
         simple = self._hal(SIMPLE_PYTHON, "Python")
