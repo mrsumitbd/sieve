@@ -124,20 +124,32 @@ _BRANCH_NODES: dict[str, set[str]] = {
         "dictionary_comprehension", "generator_expression",
     },
     "Java": {
-        "if_statement", "for_statement", "while_statement", "do_statement",
-        "switch_expression", "catch_clause", "conditional_expression",
-        "instanceof_expression",
+        "if_statement", "for_statement", "enhanced_for_statement",
+        "while_statement", "do_statement", "catch_clause", "ternary_expression",
     },
     "JavaScript": {
         "if_statement", "for_statement", "for_in_statement", "while_statement",
         "do_statement", "switch_case", "catch_clause", "ternary_expression",
-        "logical_expression", "await_expression",
     },
     "C++": {
-        "if_statement", "for_statement", "while_statement", "do_statement",
-        "switch_statement", "case_statement", "catch_clause",
-        "conditional_expression",
+        "if_statement", "for_statement", "for_range_loop", "while_statement",
+        "do_statement", "catch_clause", "conditional_expression",
     },
+}
+
+# Java, JavaScript and C++ emit one binary_expression node for every binary
+# operator, so those nodes only branch when their operator is one of these.
+_BRANCH_OPERATORS: dict[str, set[str]] = {
+    "Java":       {"&&", "||"},
+    "JavaScript": {"&&", "||"},
+    "C++":        {"&&", "||", "and", "or"},
+}
+
+# Switch labels branch unless they are `default` (JavaScript's switch_case is
+# already case-only, so it lives in _BRANCH_NODES).
+_CASE_LABEL_NODES: dict[str, str] = {
+    "Java": "switch_label",
+    "C++":  "case_statement",
 }
 
 # Control flow nodes for nesting depth
@@ -274,12 +286,26 @@ def _raw_metrics(source: str, language: str, root_node) -> dict:
 
 # ─── Cyclomatic Complexity ────────────────────────────────────────────────────
 
+def _is_branching(node, language: str) -> bool:
+    if node.type in _BRANCH_NODES.get(language, set()):
+        return True
+    if node.type == "binary_expression":
+        op = node.child_by_field_name("operator")
+        return op is not None and op.type in _BRANCH_OPERATORS.get(language, set())
+    if node.type == _CASE_LABEL_NODES.get(language):
+        # `case null, default` parses "default" as an identifier in Java.
+        return (
+            node.children[0].type == "case"
+            and not any(c.text == b"default" for c in node.children[1:])
+        )
+    return False
+
+
 def _cyclomatic_complexity(root_node, language: str) -> int:
     """McCabe cyclomatic complexity = 1 + number of branching nodes."""
-    branch_types = _BRANCH_NODES.get(language, set())
     count = [0]
     def _walk(node):
-        if node.type in branch_types:
+        if _is_branching(node, language):
             count[0] += 1
         for child in node.children:
             _walk(child)
