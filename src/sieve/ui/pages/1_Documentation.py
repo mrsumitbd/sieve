@@ -295,20 +295,35 @@ st.divider()
 
 st.header("Corpus Size Caps & Stratified Sampling")
 st.markdown("""
-When **Max Functions** or **Max Classes** is set and the extracted corpus exceeds that cap,
-SIEVE does not draw a simple random sample. Instead it uses **proportional stratified sampling**
-by repository:
+When **Max Functions** or **Max Classes** is set, SIEVE does not draw a simple random sample.
+Before extracting, it counts the available records in each repository and splits the cap
+across repositories as follows:
 
-1. Records are grouped by source repository.
-2. Each repo's allocation is `cap × (repo_count / total_count)`.
-3. Integer parts are taken first; remainder slots are filled by the repos with the largest
-   fractional allocations (standard largest-remainder method).
-4. Within each repo's allocation, records are drawn uniformly at random without replacement.
+1. Every repository that has at least one record first gets **1 slot**, so small
+   repositories are not rounded down to nothing.
+2. The remaining slots (cap minus the number of non-empty repositories) are divided in
+   proportion to each repository's **remaining records** (its count minus the one slot
+   already given). Whole shares are assigned first; any leftover slots go to the
+   repositories with the largest fractional remainders (largest-remainder method, using
+   integer arithmetic).
+3. Ties are broken deterministically: the repository with more records wins, then the
+   repository name in alphabetical order. The result does not depend on the order in which
+   repositories were processed.
+4. If the cap is **smaller than the number of non-empty repositories**, the minimum of one
+   cannot be met. The largest repositories get 1 slot each (ties by name) and the rest get 0.
+
+No repository is ever allocated more records than it has, and the allocations add up to the
+cap (or to the total available, if that is smaller). Within a repository, the allocated
+records are the first ones found while walking the repository's files, not a random draw.
+Random sampling without replacement is used only in a final safety-net step, which applies
+if the corpus still exceeds the cap after deduplication.
 
 **Example:** cap = 20, corpus = TheAlgorithms (276 classes), system-design-primer (52 classes).
-Proportional allocation: TheAlgorithms gets 17, system-design-primer gets 3.
+Each repository first gets 1 slot, leaving 18. These are split in proportion to 275 and 51
+remaining classes: TheAlgorithms gets 15 more and system-design-primer gets 3 more, so the
+final allocation is TheAlgorithms 16, system-design-primer 4.
 
-**Important caveat:** Proportional allocation preserves the *natural* distribution of the corpus.
+**Important caveat:** Apart from the one-slot minimum, allocation is proportional, so it largely preserves the *natural* distribution of the corpus.
 If your corpus is dominated by one repository (e.g. a large algorithm collection), the sample
 will reflect that. If you need balanced representation across repos, use the **Engineered Projects**
 filter or set **Max Repos** to a small number of carefully chosen repositories.

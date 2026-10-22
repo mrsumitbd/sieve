@@ -173,3 +173,13 @@ class TestLargestRemainderInvariants:
         caps = _stratified_caps(counts, 1234)
         assert sum(caps.values()) == 1234
         assert set(caps.values()) <= {0, 1}
+
+
+class TestDocumentedExample:
+    def test_documentation_example(self):
+        # Mirrors the worked example in ui/pages/1_Documentation.py; update both together.
+        counts = {"TheAlgorithms": 276, "system-design-primer": 52}
+        assert _stratified_caps(counts, 20) == {
+            "TheAlgorithms": 16,
+            "system-design-primer": 4,
+        }
