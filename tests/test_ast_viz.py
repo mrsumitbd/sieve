@@ -23,14 +23,42 @@ class TestBuildAstJson:
         result = build_ast_json(code, "Python")
         assert result["node_type"] == "module"
 
-    def test_max_depth_limits_tree(self):
-        code = "def foo():\n    if True:\n        return 1\n"
-        shallow = build_ast_json(code, "Python", max_depth=1)
-        deep    = build_ast_json(code, "Python", max_depth=10)
-        # Shallow tree should have fewer or equal total nodes
-        def count_nodes(node):
-            return 1 + sum(count_nodes(c) for c in node.get("children", []))
-        assert count_nodes(shallow) <= count_nodes(deep)
+    # Tree-sitter parse of "def foo():\n    if True:\n        return 1\n":
+    #   module -> function_definition -> [def, identifier, parameters, block]
+    # (the ":" token is filtered out; "()" is a leaf). max_depth=N keeps the
+    # nodes at depths 0..N, so the tree has N+1 levels and is cut below that.
+    _DEPTH_CODE = "def foo():\n    if True:\n        return 1\n"
+
+    @staticmethod
+    def _height(node):
+        if not node["children"]:
+            return 0
+        return 1 + max(TestBuildAstJson._height(c) for c in node["children"])
+
+    @staticmethod
+    def _count_nodes(node):
+        return 1 + sum(TestBuildAstJson._count_nodes(c) for c in node["children"])
+
+    @pytest.mark.parametrize("max_depth,expected_nodes", [
+        (0, 1),   # module only
+        (1, 2),   # + function_definition
+        (2, 6),   # + def, identifier, parameters, block
+    ])
+    def test_max_depth_cuts_tree_at_exact_node_count(self, max_depth, expected_nodes):
+        tree = build_ast_json(self._DEPTH_CODE, "Python", max_depth=max_depth)
+        assert self._count_nodes(tree) == expected_nodes
+
+    @pytest.mark.parametrize("max_depth", [0, 1, 2, 3])
+    def test_max_depth_equals_tree_height(self, max_depth):
+        tree = build_ast_json(self._DEPTH_CODE, "Python", max_depth=max_depth)
+        assert self._height(tree) == max_depth
+
+    def test_depth_beyond_tree_height_adds_nothing(self):
+        deep = build_ast_json(self._DEPTH_CODE, "Python", max_depth=50)
+        assert self._height(deep) < 50
+        assert self._count_nodes(deep) == self._count_nodes(
+            build_ast_json(self._DEPTH_CODE, "Python", max_depth=60)
+        )
 
     def test_returns_none_for_unknown_language(self):
         result = build_ast_json("some code", "COBOL")

@@ -136,6 +136,60 @@ class TestCyclomaticComplexity:
         code = "def foo(x):\n    if x > 0:\n        return x\n    return 0\n"
         assert self._cc(code, "Python") == 2
 
+    # McCabe: 1 + one per decision point, counted by hand from the source text
+    # (not from the implementation's output):
+    #   Java:       for, if, while, do-while, catch              => 1 + 5 = 6
+    #   JavaScript: for, if, for-of, while, do-while, catch, ?:  => 1 + 7 = 8
+    #   C++:        for, if, while, do-while, catch, ?:          => 1 + 6 = 7
+
+    def test_java_branching_constructs(self):
+        code = """
+class A {
+    int f(int n) {
+        int s = 0;
+        for (int i = 0; i < n; i++) {
+            if (i % 2 == 0) { s += i; }
+        }
+        while (s > 100) { s -= 10; }
+        do { s++; } while (s < 5);
+        try { s /= n; } catch (ArithmeticException e) { s = 0; }
+        return s;
+    }
+}
+"""
+        assert self._cc(code, "Java") == 6
+
+    def test_javascript_branching_constructs(self):
+        code = """
+function f(n, xs) {
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+        if (i % 2 === 0) { s += i; }
+    }
+    for (const x of xs) { s += x; }
+    while (s > 100) { s -= 10; }
+    do { s++; } while (s < 5);
+    try { s /= n; } catch (e) { s = 0; }
+    return s > 0 ? s : -s;
+}
+"""
+        assert self._cc(code, "JavaScript") == 8
+
+    def test_cpp_branching_constructs(self):
+        code = """
+int f(int n) {
+    int s = 0;
+    for (int i = 0; i < n; ++i) {
+        if (i % 2 == 0) { s += i; }
+    }
+    while (s > 100) { s -= 10; }
+    do { ++s; } while (s < 5);
+    try { s /= n; } catch (...) { s = 0; }
+    return s > 0 ? s : -s;
+}
+"""
+        assert self._cc(code, "C++") == 7
+
     def test_while_adds_1(self):
         code = "def foo(n):\n    while n > 0:\n        n -= 1\n    return n\n"
         assert self._cc(code, "Python") == 2

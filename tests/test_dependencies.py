@@ -283,13 +283,13 @@ class TestParseJsDeps:
         pkg = {"devDependencies": {"jest": "^29.0.0"}}
         _write(tmp_path, "package.json", json.dumps(pkg))
         deps = _parse_js_deps(tmp_path)
-        assert all(d["kind"] == "dev" for d in deps)
+        assert deps == [{"name": "jest", "version": "^29.0.0", "kind": "dev"}]
 
     def test_peer_dependencies_kind(self, tmp_path):
         pkg = {"peerDependencies": {"react": ">=17.0.0"}}
         _write(tmp_path, "package.json", json.dumps(pkg))
         deps = _parse_js_deps(tmp_path)
-        assert all(d["kind"] == "optional" for d in deps)
+        assert deps == [{"name": "react", "version": ">=17.0.0", "kind": "optional"}]
 
     def test_version_preserved(self, tmp_path):
         pkg = {"dependencies": {"lodash": "^4.17.21"}}
@@ -431,5 +431,7 @@ class TestParseDependencies:
         }
         _write(tmp_path, "package.json", json.dumps(pkg))
         deps = parse_dependencies(str(tmp_path), "JavaScript")
-        for d in deps:
-            assert d["kind"] in {"main", "dev", "optional"}
+        # package.json sections map to main / dev / optional (peer deps are optional)
+        assert {d["name"]: d["kind"] for d in deps} == {
+            "express": "main", "jest": "dev", "react": "optional",
+        }

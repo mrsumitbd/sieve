@@ -49,7 +49,7 @@ class TestDefaults:
         assert "function" in cfg.granularity
         assert "class" in cfg.granularity
 
-    def test_dedup_on_by_default(self):
+    def test_dedup_off_by_default(self):
         cfg = SIEVEConfig(language="Python", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1))
         assert cfg.deduplicate is False
 

@@ -111,19 +111,14 @@ class TestScore:
         assert isinstance(result, float)
         assert result == 0.85
 
-    def test_score_returns_none_for_empty_string(self, tmp_path):
+    @pytest.mark.parametrize("code", ["", "   ", "\n\t ", None])
+    def test_score_returns_none_for_blank_input_without_scoring(self, tmp_path, code):
         clf = _make_classifier(tmp_path)
         clf._loaded = True
-        clf.score_batch = MagicMock(return_value=[None])
-        result = clf.score("")
-        assert result is None
-
-    def test_score_returns_none_for_whitespace(self, tmp_path):
-        clf = _make_classifier(tmp_path)
-        clf._loaded = True
-        clf.score_batch = MagicMock(return_value=[None])
-        result = clf.score("   ")
-        assert result is None
+        # If the guard in score() were missing, this value would leak out.
+        clf.score_batch = MagicMock(return_value=[0.9])
+        assert clf.score(code) is None
+        clf.score_batch.assert_not_called()
 
     def test_score_delegates_to_score_batch(self, tmp_path):
         clf = self._clf_with_mock_batch(tmp_path, [0.42])
