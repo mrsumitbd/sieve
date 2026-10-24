@@ -33,12 +33,14 @@ import subprocess
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 import numpy as np
 
 from github import Auth, Github, GithubException
 from github.GithubException import BadCredentialsException, RateLimitExceededException
+from pydantic import SecretStr
 
+from sieve.config import reveal_secret
 from sieve.core.github_limits import fail_fast_retry
 
 logger = logging.getLogger(__name__)
@@ -299,7 +301,7 @@ def collect_metrics(
     license_spdx: Optional[str],
     contributor_count: int,
     repo_path: Optional[str],
-    github_token: Optional[str] = None,
+    github_token: Union[str, SecretStr, None] = None,
 ) -> RepoQualityMetrics:
     """
     Collect all quality metrics for a single repo.
@@ -316,7 +318,7 @@ def collect_metrics(
         Stage 3 is left False — set by apply_filters() after population stats.
     """
     g = Github(
-        auth=Auth.Token(github_token) if github_token else None,
+        auth=Auth.Token(reveal_secret(github_token)) if github_token else None,
         retry=fail_fast_retry(),
     )
 

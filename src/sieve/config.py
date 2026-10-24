@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, field_validator
-from typing import Optional
+from pydantic import BaseModel, Field, SecretStr, field_validator
+from typing import Optional, Union
 from datetime import date
 from enum import Enum
 
@@ -20,6 +20,13 @@ class ExportFormat(str, Enum):
     JSONL = "jsonl"
     PARQUET = "parquet"
     BOTH = "both"
+
+
+def reveal_secret(value: Union[str, SecretStr, None]) -> Optional[str]:
+    """Return the raw text of a token for the call that needs it; None if unset or empty."""
+    if isinstance(value, SecretStr):
+        value = value.get_secret_value()
+    return value or None
 
 
 class SIEVEConfig(BaseModel):
@@ -75,8 +82,10 @@ class SIEVEConfig(BaseModel):
     export_format: ExportFormat = Field(default=ExportFormat.JSONL)
 
     # --- GitHub ---
-    github_token: Optional[str] = Field(default=None, description="GitHub PAT for higher rate limits")
-    hf_token: Optional[str] = Field(default=None, description="HuggingFace token for downloading model weights")
+    # Secrets: excluded from model_dump / model_dump_json (and so the CLI banner and manifest.json),
+    # masked in repr/str. Accept plain strings as input.
+    github_token: Optional[SecretStr] = Field(default=None, exclude=True, description="GitHub PAT for higher rate limits")
+    hf_token: Optional[SecretStr] = Field(default=None, exclude=True, description="HuggingFace token for downloading model weights")
 
     @field_validator("granularity")
     @classmethod

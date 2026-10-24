@@ -23,9 +23,10 @@ import time
 from collections import defaultdict
 from dataclasses import asdict
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from github.GithubException import BadCredentialsException, RateLimitExceededException
+from pydantic import SecretStr
 
 from sieve.config import SIEVEConfig
 from sieve.core.discovery import discover_repos, make_client, RepoMetadata
@@ -49,7 +50,7 @@ from sieve.core.quality import collect_metrics, apply_filters, RepoQualityMetric
 logger = logging.getLogger(__name__)
 
 
-def _fetch_quota(github_token: Optional[str]) -> Optional[QuotaInfo]:
+def _fetch_quota(github_token: Union[str, SecretStr, None]) -> Optional[QuotaInfo]:
     """
     Read the GitHub quota once. Returns None if it cannot be read.
 
