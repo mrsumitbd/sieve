@@ -9,12 +9,14 @@ import time
 import logging
 from datetime import date
 from dataclasses import dataclass
-from typing import Optional, Iterator
+from typing import Optional, Iterator, Union
 
 from github import Auth, Github, GithubException
 from github.GithubException import BadCredentialsException, RateLimitExceededException
 from github.Repository import Repository
+from pydantic import SecretStr
 
+from sieve.config import reveal_secret
 from sieve.core.github_limits import fail_fast_retry
 
 logger = logging.getLogger(__name__)
@@ -47,10 +49,10 @@ LANGUAGE_QUERY_MAP = {
 GITHUB_SEARCH_PAGE_SIZE = 100
 
 
-def make_client(github_token: Optional[str] = None, **kwargs) -> Github:
+def make_client(github_token: Union[str, SecretStr, None] = None, **kwargs) -> Github:
     """Build the GitHub client used for discovery (fails fast on rate limits)."""
     return Github(
-        auth=Auth.Token(github_token) if github_token else None,
+        auth=Auth.Token(reveal_secret(github_token)) if github_token else None,
         per_page=GITHUB_SEARCH_PAGE_SIZE,
         retry=fail_fast_retry(),
         **kwargs,
@@ -75,7 +77,7 @@ def _build_query(
     )
 
 
-def _get_contributor_count(repo: Repository, token: str = None) -> int:
+def _get_contributor_count(repo: Repository, token: Union[str, SecretStr, None] = None) -> int:
     """
     Fetch contributor count. Falls back to 0 on API errors.
     The contributors endpoint is expensive — we cache via metadata snapshot.
@@ -97,7 +99,7 @@ def discover_repos(
     min_stars: int = 10,
     min_contributors: int = 1,
     max_repos: Optional[int] = None,
-    github_token: Optional[str] = None,
+    github_token: Union[str, SecretStr, None] = None,
 ) -> Iterator[RepoMetadata]:
     """
     Generator that yields RepoMetadata for repos matching all filters.

@@ -18,6 +18,10 @@ import logging
 from pathlib import Path
 from typing import Optional, Union
 
+from pydantic import SecretStr
+
+from sieve.config import reveal_secret
+
 logger = logging.getLogger(__name__)
 
 # HuggingFace Hub repo containing model weights
@@ -51,7 +55,7 @@ class LLMCodeClassifier:
     def load(
         cls,
         model_dir: Optional[Union[str, Path]] = None,
-        hf_token: Optional[str] = None,
+        hf_token: Union[str, SecretStr, None] = None,
     ) -> "LLMCodeClassifier":
         """
         Load classifier. Uses local artifacts if best_model.pt exists in
@@ -83,13 +87,11 @@ class LLMCodeClassifier:
             self._device = torch.device("cpu")
         logger.info(f"LLMCodeClassifier: using device {self._device}")
 
-        hf_token = getattr(self, "_hf_token", None)
-
         # ── Tokenizer: always load from microsoft/codebert-base ───────────────
         logger.info("Loading tokenizer from microsoft/codebert-base...")
         self._tokenizer = AutoTokenizer.from_pretrained(
             "microsoft/codebert-base",
-            token=hf_token,
+            token=reveal_secret(getattr(self, "_hf_token", None)),
         )
 
         # ── Model weights: local artifacts first, else HF Hub ─────────────────
@@ -102,7 +104,7 @@ class LLMCodeClassifier:
             weights_path = hf_hub_download(
                 repo_id=HF_REPO_ID,
                 filename="best_model.pt",
-                token=hf_token,
+                token=reveal_secret(getattr(self, "_hf_token", None)),
             )
 
         # ── Model architecture ────────────────────────────────────────────────

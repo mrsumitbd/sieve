@@ -247,7 +247,6 @@ if run_button:
         st.session_state.output_dir_path = tmp_dir
 
         try:
-            resolved_token = github_token if github_token else None
             config = SIEVEConfig(
                 language=language,
                 start_date=start_date,
@@ -265,7 +264,7 @@ if run_button:
                 dedup_threshold=dedup_threshold,
                 output_dir=tmp_dir,
                 export_format=export_format,
-                github_token=resolved_token,
+                github_token=github_token or None,
             )
         except Exception as e:
             st.error(f"Configuration error: {e}")
@@ -285,13 +284,13 @@ if run_button:
 
             try:
                 summary = run_pipeline(config, progress_callback=progress_callback)
-                summary["_ran_with_token"] = bool(resolved_token)
+                summary["_ran_with_token"] = bool(config.github_token)
                 st.session_state.summary = summary
                 _pipeline_summary = summary.get("pipeline_summary", "")
                 _status_label = f"✅ Pipeline complete! {_pipeline_summary}"
                 status.update(label=_status_label, state="complete", expanded=False)
             except (RateLimitExceededException, GitHubQuotaError) as e:
-                message = describe_rate_limit_error(e, bool(resolved_token))
+                message = describe_rate_limit_error(e, bool(config.github_token))
                 st.session_state.error = message
                 status.update(label="❌ GitHub rate limit reached", state="error", expanded=True)
             except GitHubAuthError as e:
