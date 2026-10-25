@@ -7,11 +7,13 @@ validation, error handling, and output formatting only.
 """
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import typer.main
 from typer.testing import CliRunner
 
 from sieve.cli import app
@@ -158,7 +160,8 @@ class TestRunCommand:
                 "--start-date", "2024-01-01",
                 "--end-date", "2025-01-01",
             ])
-        assert "[1/3]" in result.output
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+        assert "[1/3]" in plain
 
     def test_run_end_date_defaults_when_omitted(self):
         """When --end-date is omitted, 30 days before today should be used."""
@@ -348,3 +351,198 @@ class TestRunErrorHandling:
         assert "Traceback" not in result.output
         errors = [ln for ln in result.output.splitlines() if ln.startswith("Error:")]
         assert errors == [f"Error: {BAD_TOKEN_MESSAGE}"]
+
+
+# ─── Strict config, caps, new flags, env tokens ───────────────────────────────
+
+_RUN = ["run", "--language", "Python", "--start-date", "2024-01-01", "--end-date", "2025-01-01"]
+_BASE_CFG = {"language": "Python", "start_date": "2024-01-01", "end_date": "2025-01-01"}
+
+
+def _run_cfg(extra_args=(), env=None):
+    with patch("sieve.cli.run_pipeline", return_value=_FAKE_SUMMARY) as mock:
+        result = runner.invoke(app, _RUN + list(extra_args), env={"GITHUB_TOKEN": "", "HF_TOKEN": "", **(env or {})})
+    assert result.exit_code == 0, result.output
+    return mock.call_args[0][0], result
+
+
+def _write_cfg(tmp_path, **extra):
+    f = tmp_path / "config.json"
+    f.write_text(json.dumps({**_BASE_CFG, **extra}))
+    return f
+
+
+class TestStrictConfigFile:
+    def test_run_rejects_unknown_key_readably(self, tmp_path):
+        f = _write_cfg(tmp_path, max_repoz=5)
+        with patch("sieve.cli.run_pipeline") as mock_run:
+            result = runner.invoke(app, ["run", "--config", str(f)])
+        assert result.exit_code == 1
+        mock_run.assert_not_called()
+        lines = [ln for ln in result.output.splitlines() if ln.strip()]
+        assert lines == ["Error: invalid config: max_repoz: unknown config key"]
+
+    def test_validate_config_rejects_unknown_key_readably(self, tmp_path):
+        f = _write_cfg(tmp_path, hf_tokn="x", dedup=True)
+        result = runner.invoke(app, ["validate-config", str(f)])
+        assert result.exit_code == 1
+        lines = [ln for ln in result.output.splitlines() if ln.strip()]
+        assert len(lines) == 1
+        assert "hf_tokn: unknown config key" in lines[0]
+        assert "dedup: unknown config key" in lines[0]
+        assert "Traceback" not in result.output
+
+    def test_unknown_key_error_does_not_echo_its_value(self, tmp_path):
+        f = _write_cfg(tmp_path, github_tokn="ghp_SECRET_VALUE")
+        for args in (["run", "--config", str(f)], ["validate-config", str(f)]):
+            result = runner.invoke(app, args)
+            assert result.exit_code == 1
+            assert "github_tokn" in result.output
+            assert "ghp_SECRET_VALUE" not in result.output
+
+
+class TestCapsViaCli:
+    @pytest.mark.parametrize("flag", ["--max-repos", "--max-functions", "--max-classes"])
+    def test_zero_rejected(self, flag):
+        with patch("sieve.cli.run_pipeline") as mock_run:
+            result = runner.invoke(app, _RUN + [flag, "0"])
+        assert result.exit_code == 1
+        mock_run.assert_not_called()
+        assert flag.lstrip("-").replace("-", "_") in result.output
+        assert ">= 1" in result.output
+
+    def test_omitted_caps_are_none(self):
+        cfg, _ = _run_cfg()
+        assert (cfg.max_repos, cfg.max_functions, cfg.max_classes) == (None, None, None)
+
+    def test_positive_caps_accepted(self):
+        cfg, _ = _run_cfg(["--max-repos", "1", "--max-functions", "5", "--max-classes", "7"])
+        assert (cfg.max_repos, cfg.max_functions, cfg.max_classes) == (1, 5, 7)
+
+    @pytest.mark.parametrize("field", ["max_repos", "max_functions", "max_classes"])
+    def test_zero_rejected_in_config_file(self, tmp_path, field):
+        f = _write_cfg(tmp_path, **{field: 0})
+        result = runner.invoke(app, ["validate-config", str(f)])
+        assert result.exit_code == 1
+        assert field in result.output and ">= 1" in result.output
+
+    @pytest.mark.parametrize("field", ["max_repos", "max_functions", "max_classes"])
+    def test_null_accepted_in_config_file(self, tmp_path, field):
+        f = _write_cfg(tmp_path, **{field: None})
+        assert runner.invoke(app, ["validate-config", str(f)]).exit_code == 0
+
+
+class TestNewFlags:
+    def test_deduplicate_default_is_off(self):
+        cfg, _ = _run_cfg()
+        assert cfg.deduplicate is False
+
+    def test_deduplicate_flags(self):
+        assert _run_cfg(["--deduplicate"])[0].deduplicate is True
+        assert _run_cfg(["--no-deduplicate"])[0].deduplicate is False
+
+    def test_granularity_default_is_both(self):
+        assert _run_cfg()[0].granularity == ["function", "class"]
+
+    @pytest.mark.parametrize("choice,expected", [
+        ("function", ["function"]),
+        ("class", ["class"]),
+        ("both", ["function", "class"]),
+    ])
+    def test_granularity_mapping(self, choice, expected):
+        assert _run_cfg(["--granularity", choice])[0].granularity == expected
+
+    def test_granularity_invalid_choice_rejected(self):
+        with patch("sieve.cli.run_pipeline") as mock_run:
+            result = runner.invoke(app, _RUN + ["--granularity", "method"])
+        assert result.exit_code != 0
+        mock_run.assert_not_called()
+
+    def test_annotate_llm_score_flags(self):
+        assert _run_cfg()[0].annotate_llm_score is False
+        assert _run_cfg(["--annotate-llm-score"])[0].annotate_llm_score is True
+        assert _run_cfg(["--no-annotate-llm-score"])[0].annotate_llm_score is False
+
+    def test_export_ast_flags(self):
+        assert _run_cfg()[0].export_ast is False
+        assert _run_cfg(["--export-ast"])[0].export_ast is True
+        assert _run_cfg(["--no-export-ast"])[0].export_ast is False
+
+    def test_no_hf_token_flag(self):
+        run_cmd = typer.main.get_command(app).commands["run"]
+        names = {o for p in run_cmd.params for o in (*p.opts, *p.secondary_opts)}
+        assert "--hf-token" not in names
+        assert "--granularity" in names
+        assert "--annotate-llm-score" in names
+        assert "--export-ast" in names
+        assert "--github-token" in names
+
+
+class TestEnvTokenFallback:
+    GH = "ghp_ENV_GITHUB_123"
+    HF = "hf_ENV_TOKEN_456"
+
+    def _assert_hidden(self, result):
+        assert self.GH not in result.output
+        assert self.HF not in result.output
+
+    def test_flags_path_reads_both_env_vars(self):
+        from sieve.config import reveal_secret
+
+        cfg, result = _run_cfg(env={"GITHUB_TOKEN": self.GH, "HF_TOKEN": self.HF})
+        assert reveal_secret(cfg.github_token) == self.GH
+        assert reveal_secret(cfg.hf_token) == self.HF
+        self._assert_hidden(result)
+
+    def test_flags_path_flag_beats_env(self):
+        from sieve.config import reveal_secret
+
+        cfg, result = _run_cfg(["--github-token", "ghp_FLAG"], env={"GITHUB_TOKEN": self.GH})
+        assert reveal_secret(cfg.github_token) == "ghp_FLAG"
+        assert "ghp_FLAG" not in result.output
+
+    def test_config_path_reads_both_env_vars(self, tmp_path):
+        from sieve.config import reveal_secret
+
+        f = _write_cfg(tmp_path)
+        with patch("sieve.cli.run_pipeline", return_value=_FAKE_SUMMARY) as mock:
+            result = runner.invoke(app, ["run", "--config", str(f)], env={"GITHUB_TOKEN": self.GH, "HF_TOKEN": self.HF})
+        assert result.exit_code == 0, result.output
+        cfg = mock.call_args[0][0]
+        assert reveal_secret(cfg.github_token) == self.GH
+        assert reveal_secret(cfg.hf_token) == self.HF
+        self._assert_hidden(result)
+
+    def test_config_path_file_value_beats_env(self, tmp_path):
+        from sieve.config import reveal_secret
+
+        f = _write_cfg(tmp_path, github_token="ghp_FILE", hf_token="hf_FILE")
+        with patch("sieve.cli.run_pipeline", return_value=_FAKE_SUMMARY) as mock:
+            result = runner.invoke(app, ["run", "--config", str(f)], env={"GITHUB_TOKEN": self.GH, "HF_TOKEN": self.HF})
+        cfg = mock.call_args[0][0]
+        assert reveal_secret(cfg.github_token) == "ghp_FILE"
+        assert reveal_secret(cfg.hf_token) == "hf_FILE"
+        assert "ghp_FILE" not in result.output and "hf_FILE" not in result.output
+        self._assert_hidden(result)
+
+    def test_empty_file_value_falls_back_to_env(self, tmp_path):
+        from sieve.config import reveal_secret
+
+        f = _write_cfg(tmp_path, github_token="")
+        with patch("sieve.cli.run_pipeline", return_value=_FAKE_SUMMARY) as mock:
+            runner.invoke(app, ["run", "--config", str(f)], env={"GITHUB_TOKEN": self.GH})
+        assert reveal_secret(mock.call_args[0][0].github_token) == self.GH
+
+    def test_unset_env_leaves_tokens_none(self):
+        cfg, _ = _run_cfg()
+        assert cfg.github_token is None and cfg.hf_token is None
+
+    def test_not_in_manifest(self, tmp_path):
+        f = _write_cfg(tmp_path, output_dir=str(tmp_path / "out"))
+        with patch("sieve.pipeline._fetch_quota", return_value=None), \
+             patch("sieve.pipeline.discover_repos", return_value=iter([])):
+            result = runner.invoke(app, ["run", "--config", str(f)], env={"GITHUB_TOKEN": self.GH, "HF_TOKEN": self.HF})
+        assert result.exit_code == 0, result.output
+        self._assert_hidden(result)
+        assert self.GH not in (tmp_path / "out" / "manifest.json").read_text()
+        assert self.HF not in (tmp_path / "out" / "manifest.json").read_text()

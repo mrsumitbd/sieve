@@ -11,22 +11,24 @@ Usage:
 
 import json
 import logging
+import os
 import sys
 from datetime import date
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
 import typer
 from dotenv import load_dotenv
 from github.GithubException import RateLimitExceededException
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 load_dotenv()
 
-from sieve.config import SIEVEConfig, Language, Granularity, ExportFormat
+from sieve.config import SIEVEConfig, Language, Granularity, ExportFormat, reveal_secret
 from sieve.core.github_limits import GitHubAuthError, GitHubQuotaError, describe_rate_limit_error, partial_results_message
 from sieve.pipeline import run_pipeline
 
@@ -44,34 +46,65 @@ logging.basicConfig(
 )
 
 
+class GranularityChoice(str, Enum):
+    FUNCTION = "function"
+    CLASS = "class"
+    BOTH = "both"
+
+
+_GRANULARITY_LEVELS = {
+    GranularityChoice.FUNCTION: ["function"],
+    GranularityChoice.CLASS: ["class"],
+    GranularityChoice.BOTH: ["function", "class"],
+}
+
+# config field -> environment variable used when the field is not otherwise set
+_TOKEN_ENV_VARS = {"github_token": "GITHUB_TOKEN", "hf_token": "HF_TOKEN"}
+
+
 def _format_validation_error(e: ValidationError) -> str:
     """One line naming each invalid field and the problem, without the pydantic dump."""
     parts = []
     for err in e.errors():
         field = ".".join(str(p) for p in err["loc"]) or "config"
-        parts.append(f"{field}: {err['msg']}")
+        if err["type"] == "extra_forbidden":
+            parts.append(f"{field}: unknown config key")
+        else:
+            parts.append(f"{field}: {err['msg']}")
     return "; ".join(parts)
+
+
+def _apply_env_tokens(config: SIEVEConfig) -> None:
+    """Fill github_token / hf_token from the environment, only where the config has none."""
+    for field, var in _TOKEN_ENV_VARS.items():
+        if reveal_secret(getattr(config, field)) is None:
+            value = os.environ.get(var)
+            if value:
+                setattr(config, field, SecretStr(value))
 
 
 @app.command("run")
 def run(
     config_file: Optional[Path] = typer.Option(
-        None, "--config", "-c", help="Path to a JSON config file"
+        None, "--config", "-c", help="Path to a JSON config file. When given, all other options are ignored (except the GITHUB_TOKEN / HF_TOKEN env vars, used for tokens the file leaves unset). Unknown keys are an error"
     ),
     language: Optional[str] = typer.Option(None, help="Programming language"),
     start_date: Optional[str] = typer.Option(None, help="Repo creation lower bound (YYYY-MM-DD). E.g. an LLM's release date for contamination-aware evaluation, or any reference date to bound a corpus to a development era (bounds repo age, not the origin of each snippet)."),
-    end_date: Optional[str] = typer.Option(None, help="Repo creation upper bound (YYYY-MM-DD). Defaults to 30 days before today."),
+    end_date: Optional[str] = typer.Option(None, help="Repo creation upper bound (YYYY-MM-DD). Default: 30 days before today."),
     min_stars: int = typer.Option(10, help="Minimum stars"),
     min_contributors: int = typer.Option(1, help="Minimum contributors"),
-    max_repos: Optional[int] = typer.Option(None, help="Max repos to process (default: no cap)"),
-    max_functions: Optional[int] = typer.Option(None, help="Max functions after deduplication — stratified by repo (default: no cap)"),
-    max_classes: Optional[int] = typer.Option(None, help="Max classes after deduplication — stratified by repo (default: no cap)"),
+    max_repos: Optional[int] = typer.Option(None, help="Max repos to process. Omit for no cap; otherwise must be >= 1"),
+    max_functions: Optional[int] = typer.Option(None, help="Max functions after deduplication, stratified by repo. Omit for no cap; otherwise must be >= 1"),
+    max_classes: Optional[int] = typer.Option(None, help="Max classes after deduplication, stratified by repo. Omit for no cap; otherwise must be >= 1"),
+    granularity: GranularityChoice = typer.Option(GranularityChoice.BOTH, help="What to extract: function, class or both"),
     engineered_only: bool = typer.Option(False, help="Apply engineered project filter (Xiao et al., 2025; in the spirit of Reaper, Munaiah et al., 2017)"),
-    deduplicate: bool = typer.Option(True, help="Enable deduplication"),
-    dedup_threshold: float = typer.Option(0.8, help="Dedup similarity threshold"),
+    deduplicate: bool = typer.Option(False, help="Enable MinHash near-duplicate removal"),
+    dedup_threshold: float = typer.Option(0.8, help="Dedup similarity threshold (0.0-1.0). Only used with --deduplicate"),
+    annotate_llm_score: bool = typer.Option(False, "--annotate-llm-score/--no-annotate-llm-score", help="Annotate each record with P(LLM-generated). Downloads classifier weights on first use; reads HF_TOKEN from the environment if set"),
+    export_ast: bool = typer.Option(False, "--export-ast/--no-export-ast", help="Include the full AST JSON in each record; increases file size significantly"),
     output_dir: str = typer.Option("./sieve_output", help="Output directory"),
     export_format: str = typer.Option("jsonl", help="Export format: jsonl, parquet, or both"),
-    github_token: Optional[str] = typer.Option(None, envvar="GITHUB_TOKEN", help="GitHub PAT"),
+    github_token: Optional[str] = typer.Option(None, help="GitHub PAT. Default: the GITHUB_TOKEN environment variable"),
 ):
     """Run the SIEVE pipeline."""
     # Config file takes precedence over individual flags
@@ -110,10 +143,12 @@ def run(
                 max_repos=max_repos,
                 max_functions=max_functions,
                 max_classes=max_classes,
-                granularity=["function", "class"],
+                granularity=_GRANULARITY_LEVELS[granularity],
                 engineered_only=engineered_only,
                 deduplicate=deduplicate,
                 dedup_threshold=dedup_threshold,
+                annotate_llm_score=annotate_llm_score,
+                export_ast=export_ast,
                 output_dir=output_dir,
                 export_format=export_format,
                 github_token=github_token,
@@ -121,6 +156,8 @@ def run(
         except ValidationError as e:
             typer.echo(f"Error: invalid config: {_format_validation_error(e)}", err=True)
             raise typer.Exit(1)
+
+    _apply_env_tokens(config)
 
     console.print(f"\n[bold cyan]🔬 SIEVE[/bold cyan] — starting pipeline\n")
     console.print_json(config.model_dump_json(indent=2))

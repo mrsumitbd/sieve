@@ -80,6 +80,51 @@ class TestHomeDefaults:
         assert values["Minimum Contributors"] == 5
 
 
+class TestHomeCapTranslation:
+    """0 = no cap and -1 = skip in the widgets must always yield a valid SIEVEConfig."""
+
+    @staticmethod
+    def _run_with(repos, funcs, classes):
+        from unittest.mock import patch
+
+        at = _app().run()
+        values = {
+            "Max Repos (0 = no cap)": repos,
+            "Max Functions (-1 = skip, 0 = no cap)": funcs,
+            "Max Classes (-1 = skip, 0 = no cap)": classes,
+        }
+        for w in at.sidebar.number_input:
+            if w.label in values:
+                w.set_value(values[w.label])
+        captured = {}
+
+        def fake(config, *a, **kw):
+            captured["config"] = config
+            raise RuntimeError("stop")
+
+        with patch("sieve.pipeline.run_pipeline", side_effect=fake):
+            at.sidebar.button[0].click().run()
+        return at, captured.get("config")
+
+    @pytest.mark.parametrize("repos,funcs,classes,expected", [
+        (0, 0, 0, (None, None, None, ["function", "class"])),
+        (5, 10, 20, (5, 10, 20, ["function", "class"])),
+        (0, -1, 0, (None, None, None, ["class"])),
+        (0, 0, -1, (None, None, None, ["function"])),
+        (1, -1, 3, (1, None, 3, ["class"])),
+    ])
+    def test_valid_configs(self, repos, funcs, classes, expected):
+        at, cfg = self._run_with(repos, funcs, classes)
+        assert not [e for e in at.error if "Configuration error" in e.value]
+        assert cfg is not None
+        assert (cfg.max_repos, cfg.max_functions, cfg.max_classes, cfg.granularity) == expected
+
+    def test_both_skipped_is_a_ui_error_not_a_config(self):
+        at, cfg = self._run_with(0, -1, -1)
+        assert cfg is None
+        assert [e for e in at.error if "At least one granularity" in e.value]
+
+
 class TestHomeRejectedToken:
     def test_run_with_rejected_token_shows_message(self):
         from unittest.mock import patch

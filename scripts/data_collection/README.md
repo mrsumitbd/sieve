@@ -9,11 +9,16 @@ Scripts for generating AI-labeled code datasets to train the SIEVE `llm_score` c
 Run SIEVE to collect human-written code from GitHub repos, then export to JSONL:
 
 ```bash
+# --deduplicate and --dedup-threshold are passed explicitly: in v0.1.1 and earlier the CLI
+# deduplicated by default (threshold 0.8), and the datasets built with these
+# scripts were produced that way. The default is now off.
 sieve run \
   --language Java \
   --start-date 2024-06-01 \
   --end-date 2025-01-01 \
   --min-stars 50 \
+  --deduplicate \
+  --dedup-threshold 0.8 \
   --output-dir ./sieve_output/java \
   --export-format jsonl
 ```

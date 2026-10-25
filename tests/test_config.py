@@ -110,7 +110,7 @@ class TestExtractionCaps:
             )
 
     @pytest.mark.parametrize("field", ["max_functions", "max_classes"])
-    @pytest.mark.parametrize("value", [None, 0, 1, 500])
+    @pytest.mark.parametrize("value", [None, 1, 500])
     def test_valid_cap_accepted(self, field, value):
         cfg = SIEVEConfig(
             language="Python",
@@ -119,6 +119,59 @@ class TestExtractionCaps:
             **{field: value},
         )
         assert getattr(cfg, field) == value
+
+
+class TestCapsRejectZero:
+    @pytest.mark.parametrize("field", ["max_repos", "max_functions", "max_classes"])
+    def test_zero_rejected_with_clear_message(self, field):
+        with pytest.raises(ValidationError) as exc:
+            SIEVEConfig(
+                language="Python",
+                start_date=date(2024, 1, 1),
+                end_date=date(2025, 1, 1),
+                **{field: 0},
+            )
+        msg = str(exc.value)
+        assert field in msg
+        assert "None (no cap) or an integer >= 1" in msg
+
+    @pytest.mark.parametrize("field", ["max_repos", "max_functions", "max_classes"])
+    def test_none_means_no_cap(self, field):
+        cfg = SIEVEConfig(
+            language="Python",
+            start_date=date(2024, 1, 1),
+            end_date=date(2025, 1, 1),
+            **{field: None},
+        )
+        assert getattr(cfg, field) is None
+
+
+class TestStrictKeys:
+    def test_unknown_key_rejected_and_named(self):
+        with pytest.raises(ValidationError, match="max_repoz"):
+            SIEVEConfig(
+                language="Python",
+                start_date=date(2024, 1, 1),
+                end_date=date(2025, 1, 1),
+                max_repoz=5,
+            )
+
+    def test_no_pydantic_class_config_deprecation(self):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            import importlib
+
+            import sieve.config
+
+            importlib.reload(sieve.config)
+
+    def test_enum_values_still_plain_strings(self):
+        cfg = SIEVEConfig(language="Python", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1))
+        assert cfg.language == "Python"
+        assert cfg.granularity == ["function", "class"]
+        assert cfg.export_format == "jsonl"
 
 
 class TestMaxRepos:
@@ -132,7 +185,7 @@ class TestMaxRepos:
                 max_repos=bad,
             )
 
-    @pytest.mark.parametrize("value", [None, 0, 1, 500])
+    @pytest.mark.parametrize("value", [None, 1, 500])
     def test_valid_max_repos_accepted(self, value):
         cfg = SIEVEConfig(
             language="Python",
