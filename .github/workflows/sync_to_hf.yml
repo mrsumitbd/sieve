@@ -1,17 +1,13 @@
 name: Sync to HuggingFace Spaces
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types:
-      - completed
-    branches:
-      - main
+  release:
+    types: [published]
+  workflow_dispatch:
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,5 +21,5 @@ jobs:
         run: |
           git config --global user.email "mrsumitbd@users.noreply.github.com"
           git config --global user.name "Musfiqur Rahman"
-          git push https://mrahman2025:${HF_TOKEN}@huggingface.co/spaces/mrahman2025/sieve main --force
+          git push https://mrahman2025:${HF_TOKEN}@huggingface.co/spaces/mrahman2025/sieve HEAD:main --force
           
