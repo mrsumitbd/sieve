@@ -15,7 +15,7 @@ authors:
 repository-code: "https://github.com/mrsumitbd/sieve"
 url: "https://mrahman2025-sieve.hf.space"
 license: MIT
-version: 0.1.0
+version: 0.1.1
 keywords:
   - code corpus
   - large language models
