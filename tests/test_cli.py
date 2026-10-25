@@ -7,11 +7,13 @@ validation, error handling, and output formatting only.
 """
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import typer.main
 from typer.testing import CliRunner
 
 from sieve.cli import app
@@ -158,7 +160,8 @@ class TestRunCommand:
                 "--start-date", "2024-01-01",
                 "--end-date", "2025-01-01",
             ])
-        assert "[1/3]" in result.output
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+        assert "[1/3]" in plain
 
     def test_run_end_date_defaults_when_omitted(self):
         """When --end-date is omitted, 30 days before today should be used."""
@@ -466,11 +469,13 @@ class TestNewFlags:
         assert _run_cfg(["--no-export-ast"])[0].export_ast is False
 
     def test_no_hf_token_flag(self):
-        result = runner.invoke(app, ["run", "--help"], env={"COLUMNS": "200"})
-        assert "--hf-token" not in result.output
-        assert "--granularity" in result.output
-        assert "--annotate-llm-score" in result.output
-        assert "--export-ast" in result.output
+        run_cmd = typer.main.get_command(app).commands["run"]
+        names = {o for p in run_cmd.params for o in (*p.opts, *p.secondary_opts)}
+        assert "--hf-token" not in names
+        assert "--granularity" in names
+        assert "--annotate-llm-score" in names
+        assert "--export-ast" in names
+        assert "--github-token" in names
 
 
 class TestEnvTokenFallback:
