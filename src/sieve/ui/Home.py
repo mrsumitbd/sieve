@@ -334,6 +334,16 @@ if st.session_state.summary:
     c4.metric("Total Records",   s["total_functions"] + s["total_classes"])
     c5.metric("Failed Repos",    s["total_repos_failed"])
 
+    if s.get("total_llm_score_truncated"):
+        n_trunc  = s["total_llm_score_truncated"]
+        n_scored = s.get("total_llm_scored")
+        of_scored = f" of {n_scored}" if n_scored else ""
+        st.caption(
+            f"{n_trunc}{of_scored} scored record(s) are longer than 512 tokens: "
+            "their LLM score reflects only the first 512 tokens "
+            "(`llm_score_truncated` = true in the exported data)."
+        )
+
     if s.get("failed_repos"):
         with st.expander(f"Failed repos ({len(s['failed_repos'])})"):
             for r in s["failed_repos"]:
@@ -579,9 +589,13 @@ if st.session_state.summary:
                     st.markdown(f"- **Lines:** {line_label}")
 
                 llm = record.get("llm_score")
+                llm_note = (
+                    " *(truncated: scored on the first 512 tokens only)*"
+                    if llm is not None and record.get("llm_score_truncated") else ""
+                )
                 st.markdown(
                     f"- **LLM Score:** "
-                    f"{f'{llm:.3f}' if llm is not None else '`not scored`'}"
+                    f"{f'{llm:.3f}' if llm is not None else '`not scored`'}{llm_note}"
                 )
 
                 used_imports = record.get("used_imports") or []

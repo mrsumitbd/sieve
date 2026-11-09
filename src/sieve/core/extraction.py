@@ -40,6 +40,7 @@ class FunctionRecord:
     parent_class: Optional[str]
     decorators: list[str]
     llm_score: Optional[float] = None   # P(LLM-generated) — populated by classifier
+    llm_score_truncated: Optional[bool] = None  # True if only the first 512 tokens were scored; None if not scored
     ast_depth: Optional[int] = None     # Max depth of the parse tree
     ast_num_nodes: Optional[int] = None # Total node count
     ast_node_types: Optional[dict] = None  # Node type → count
@@ -89,6 +90,7 @@ class ClassRecord:
     start_line: int
     end_line: int
     llm_score: Optional[float] = None   # P(LLM-generated) — populated by classifier
+    llm_score_truncated: Optional[bool] = None  # True if only the first 512 tokens were scored; None if not scored
     ast_depth: Optional[int] = None     # Max depth of the parse tree
     ast_num_nodes: Optional[int] = None # Total node count
     ast_node_types: Optional[dict] = None  # Node type → count

@@ -50,6 +50,80 @@ class TestHomeRateLimitGuidance:
         assert "Add a GitHub token" in warnings[0]
 
 
+class TestHomeTruncationVisibility:
+    """Records scored on only their first 512 tokens must be visible in the UI."""
+
+    @staticmethod
+    def _summary(tmp_path, truncated=None, records=(), scored=None):
+        import json
+        paths = {}
+        if records:
+            f = tmp_path / "functions.jsonl"
+            f.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+            paths["functions_jsonl"] = str(f)
+        s = {
+            "total_repos_discovered": 1, "total_repos_processed": 1, "total_repos_failed": 0,
+            "total_functions": len(records), "total_classes": 0, "failed_repos": [],
+            "repo_stats": [], "output_paths": paths, "repo_metadata": [],
+        }
+        if truncated is not None:
+            s["total_llm_score_truncated"] = truncated
+        if scored is not None:
+            s["total_llm_scored"] = scored
+        return s
+
+    def test_run_summary_mentions_truncated_count(self, tmp_path):
+        at = _app()
+        at.session_state["summary"] = self._summary(tmp_path, truncated=7, scored=40)
+        at.run()
+        assert not at.exception
+        notes = [t for t in _texts(at.caption) if "truncated" in t.lower()]
+        assert len(notes) == 1 and "512" in notes[0]
+        assert "7 of 40" in notes[0]            # truncated out of scored, not out of all records
+
+    def test_run_summary_tolerates_missing_scored_count(self, tmp_path):
+        at = _app()
+        at.session_state["summary"] = self._summary(tmp_path, truncated=3)   # older summary dict
+        at.run()
+        assert not at.exception
+        (note,) = [t for t in _texts(at.caption) if "truncated" in t.lower()]
+        assert "3" in note
+
+    @pytest.mark.parametrize("value", [0, None])
+    def test_run_summary_is_silent_when_nothing_truncated(self, tmp_path, value):
+        at = _app()
+        at.session_state["summary"] = self._summary(tmp_path, truncated=value)
+        at.run()
+        assert not at.exception
+        assert not [t for t in _texts(at.caption) if "truncated" in t.lower()]
+
+    @staticmethod
+    def _sample_markdown(tmp_path, **extra):
+        record = {"repo": "o/r", "file_path": "a.py", "language": "Python",
+                  "func_name": "f", "parameters": [], "source_code": "def f(): pass",
+                  "used_imports": [], "start_line": 1, "end_line": 1, **extra}
+        at = _app()
+        at.session_state["summary"] = TestHomeTruncationVisibility._summary(tmp_path, records=[record])
+        at.session_state["sample"] = ("Function/Method", record, 0, 1)
+        at.run()
+        assert not at.exception
+        return [m.value for m in at.markdown if "LLM Score" in m.value]
+
+    def test_sample_viewer_flags_a_truncated_score(self, tmp_path):
+        (line,) = self._sample_markdown(tmp_path, llm_score=0.87, llm_score_truncated=True)
+        assert "0.870" in line and "truncated" in line.lower() and "512" in line
+
+    @pytest.mark.parametrize("extra", [
+        {"llm_score": 0.87, "llm_score_truncated": False},
+        {"llm_score": 0.87},                                 # file from before this field existed
+        {"llm_score": None, "llm_score_truncated": None},
+    ])
+    def test_sample_viewer_unchanged_when_not_truncated(self, tmp_path, extra):
+        (line,) = self._sample_markdown(tmp_path, **extra)
+        assert "truncated" not in line.lower()
+        assert ("0.870" in line) == (extra.get("llm_score") is not None)
+
+
 class TestHomeWelcome:
     def test_token_step_is_optional_and_no_example_option(self):
         at = _app().run()
