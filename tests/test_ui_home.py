@@ -139,13 +139,69 @@ class TestHomeWelcome:
         assert [b.label for b in at.sidebar.button] == ["▶ Run SIEVE"]
 
 
+# ─── Parameter widgets: same semantics as the CLI and SIEVEConfig ─────────────
+
+CAP_REPOS = "Max Repos (0 = no cap)"
+CAP_FUNCS = "Max Functions (0 = no cap)"
+CAP_CLASSES = "Max Classes (0 = no cap)"
+CHK_FUNCS = "Extract functions"
+CHK_CLASSES = "Extract classes"
+TGL_AST = "Export Full AST"
+
+
+def _widget(at, kind, label):
+    (w,) = [w for w in getattr(at.sidebar, kind) if w.label == label]
+    return w
+
+
+def _set(at, values):
+    """Apply {label: value} to whichever sidebar widget carries that label.
+
+    Sliders go last, after a rerun: the dedup slider is disabled until Deduplicate is on,
+    and newer Streamlit refuses to set a widget that is still disabled in the last run.
+    """
+    kinds = ("number_input", "checkbox", "toggle", "slider", "selectbox")
+
+    def widget(label):
+        matches = [w for k in kinds for w in getattr(at.sidebar, k) if w.label == label]
+        assert len(matches) == 1, f"expected one widget labelled {label!r}, found {len(matches)}"
+        return matches[0]
+
+    sliders = {k: v for k, v in values.items() if widget(k) in at.sidebar.slider}
+    for label, value in values.items():
+        if label not in sliders:
+            widget(label).set_value(value)
+    if sliders:
+        at.run()
+        for label, value in sliders.items():
+            widget(label).set_value(value)
+
+
+def _run_ui(values=None):
+    """Set widgets, click Run with the pipeline stubbed out; return (AppTest, config or None, pipeline mock)."""
+    from unittest.mock import patch
+
+    at = _app().run()
+    _set(at, values or {})
+    captured = {}
+
+    def fake(config, *a, **kw):
+        captured["config"] = config
+        raise RuntimeError("stop")
+
+    with patch("sieve.pipeline.run_pipeline", side_effect=fake) as pipeline:
+        at.sidebar.button[0].click().run()
+    assert not at.exception
+    return at, captured.get("config"), pipeline
+
+
 class TestHomeDefaults:
     def test_cap_defaults(self):
         at = _app().run()
         values = {w.label: w.value for w in at.sidebar.number_input}
-        assert values["Max Repos (0 = no cap)"] == 20
-        assert values["Max Functions (-1 = skip, 0 = no cap)"] == 30
-        assert values["Max Classes (-1 = skip, 0 = no cap)"] == 30
+        assert values[CAP_REPOS] == 20
+        assert values[CAP_FUNCS] == 30
+        assert values[CAP_CLASSES] == 30
 
     def test_other_defaults_unchanged(self):
         at = _app().run()
@@ -153,50 +209,219 @@ class TestHomeDefaults:
         assert values["Minimum Stars"] == 50
         assert values["Minimum Contributors"] == 5
 
+    def test_granularity_checkboxes_default_to_both(self):
+        at = _app().run()
+        assert {w.label: w.value for w in at.sidebar.checkbox} == {CHK_FUNCS: True, CHK_CLASSES: True}
+
+    def test_no_minus_one_left_in_the_widgets(self):
+        at = _app().run()
+        for w in at.sidebar.number_input:
+            assert w.min is None or w.min >= 0, f"{w.label!r} still accepts negative values"
+            assert "-1" not in w.label
+        assert "skip" not in " ".join(w.label.lower() for w in at.sidebar.number_input)
+
+    def test_single_ast_toggle_replaces_the_two_old_ones(self):
+        at = _app().run()
+        toggles = {t.label: t.value for t in at.sidebar.toggle}
+        assert toggles[TGL_AST] is False
+        assert "Export AST-Derived Features" not in toggles
+        assert "Include Full AST in Export" not in toggles
+
+    def test_other_toggles_keep_labels_and_defaults(self):
+        at = _app().run()
+        toggles = {t.label: t.value for t in at.sidebar.toggle}
+        for label in ("Engineered Projects Only", "Annotate LLM Score", "Deduplicate"):
+            assert toggles[label] is False
+
+
+class TestHomeGranularityWidgets:
+    def test_unchecking_a_level_disables_only_its_cap(self):
+        at = _app().run()
+        at.sidebar.checkbox[0].uncheck().run()          # Extract functions
+        assert _widget(at, "number_input", CAP_FUNCS).disabled
+        assert not _widget(at, "number_input", CAP_CLASSES).disabled
+        assert not _widget(at, "number_input", CAP_REPOS).disabled
+
+    def test_unchecking_classes_disables_the_class_cap(self):
+        at = _app().run()
+        _widget(at, "checkbox", CHK_CLASSES).uncheck().run()
+        assert _widget(at, "number_input", CAP_CLASSES).disabled
+        assert not _widget(at, "number_input", CAP_FUNCS).disabled
+
+    def test_rechecking_reenables_the_cap(self):
+        at = _app().run()
+        _widget(at, "checkbox", CHK_CLASSES).uncheck().run()
+        _widget(at, "checkbox", CHK_CLASSES).check().run()
+        assert not _widget(at, "number_input", CAP_CLASSES).disabled
+
+    def test_both_unchecked_blocks_the_run_with_an_error(self):
+        at, cfg, pipeline = _run_ui({CHK_FUNCS: False, CHK_CLASSES: False})
+        assert cfg is None
+        pipeline.assert_not_called()
+        assert [e for e in at.main.error if "At least one" in e.value]
+        assert at.session_state["summary"] is None
+
+    def test_both_unchecked_error_is_visible_before_running(self):
+        at = _app().run()
+        _set(at, {CHK_FUNCS: False, CHK_CLASSES: False})
+        at.run()
+        assert not at.exception
+        assert [e for e in at.error if "At least one" in e.value]
+
+    def test_one_checked_shows_no_granularity_error(self):
+        at = _app().run()
+        _set(at, {CHK_CLASSES: False})
+        at.run()
+        assert not [e for e in at.error if "At least one" in e.value]
+
 
 class TestHomeCapTranslation:
-    """0 = no cap and -1 = skip in the widgets must always yield a valid SIEVEConfig."""
-
-    @staticmethod
-    def _run_with(repos, funcs, classes):
-        from unittest.mock import patch
-
-        at = _app().run()
-        values = {
-            "Max Repos (0 = no cap)": repos,
-            "Max Functions (-1 = skip, 0 = no cap)": funcs,
-            "Max Classes (-1 = skip, 0 = no cap)": classes,
-        }
-        for w in at.sidebar.number_input:
-            if w.label in values:
-                w.set_value(values[w.label])
-        captured = {}
-
-        def fake(config, *a, **kw):
-            captured["config"] = config
-            raise RuntimeError("stop")
-
-        with patch("sieve.pipeline.run_pipeline", side_effect=fake):
-            at.sidebar.button[0].click().run()
-        return at, captured.get("config")
+    """0 = no cap in the widgets becomes None in SIEVEConfig; 0 and -1 never reach the config."""
 
     @pytest.mark.parametrize("repos,funcs,classes,expected", [
-        (0, 0, 0, (None, None, None, ["function", "class"])),
-        (5, 10, 20, (5, 10, 20, ["function", "class"])),
-        (0, -1, 0, (None, None, None, ["class"])),
-        (0, 0, -1, (None, None, None, ["function"])),
-        (1, -1, 3, (1, None, 3, ["class"])),
+        (0, 0, 0, (None, None, None)),
+        (5, 10, 20, (5, 10, 20)),
+        (1, 0, 3, (1, None, 3)),
+        (0, 1, 0, (None, 1, None)),
     ])
     def test_valid_configs(self, repos, funcs, classes, expected):
-        at, cfg = self._run_with(repos, funcs, classes)
+        at, cfg, _ = _run_ui({CAP_REPOS: repos, CAP_FUNCS: funcs, CAP_CLASSES: classes})
         assert not [e for e in at.error if "Configuration error" in e.value]
         assert cfg is not None
-        assert (cfg.max_repos, cfg.max_functions, cfg.max_classes, cfg.granularity) == expected
+        assert (cfg.max_repos, cfg.max_functions, cfg.max_classes) == expected
+        assert cfg.granularity == ["function", "class"]
 
-    def test_both_skipped_is_a_ui_error_not_a_config(self):
-        at, cfg = self._run_with(0, -1, -1)
-        assert cfg is None
-        assert [e for e in at.error if "At least one granularity" in e.value]
+    @pytest.mark.parametrize("values,granularity,caps", [
+        ({CHK_FUNCS: False}, ["class"], (None, 30)),
+        ({CHK_CLASSES: False}, ["function"], (30, None)),
+        # a disabled level's leftover cap value must not leak into the config
+        ({CHK_FUNCS: False, CAP_FUNCS: 99, CAP_CLASSES: 4}, ["class"], (None, 4)),
+        ({CHK_CLASSES: False, CAP_CLASSES: 99, CAP_FUNCS: 0}, ["function"], (None, None)),
+    ])
+    def test_unchecked_level_is_dropped_and_uncapped(self, values, granularity, caps):
+        at, cfg, _ = _run_ui(values)
+        assert cfg is not None
+        assert cfg.granularity == granularity
+        assert (cfg.max_functions, cfg.max_classes) == caps
+
+    def test_no_zero_or_negative_cap_ever_reaches_the_config(self):
+        for values in ({CAP_REPOS: 0, CAP_FUNCS: 0, CAP_CLASSES: 0}, {CHK_FUNCS: False}, {CHK_CLASSES: False}):
+            _, cfg, _ = _run_ui(values)
+            for cap in (cfg.max_repos, cfg.max_functions, cfg.max_classes):
+                assert cap is None or cap >= 1
+
+
+class TestHomeAstExport:
+    def test_off_by_default(self):
+        _, cfg, _ = _run_ui()
+        assert cfg.export_ast is False
+
+    def test_toggle_sets_export_ast(self):
+        _, cfg, _ = _run_ui({TGL_AST: True})
+        assert cfg.export_ast is True
+
+
+class TestHomeConfigPreview:
+    def test_preview_matches_the_config_that_runs(self):
+        import json
+
+        values = {CHK_FUNCS: False, CAP_CLASSES: 7, CAP_REPOS: 0, TGL_AST: True}
+        at = _app().run()
+        _set(at, values)
+        at.run()
+        preview = json.loads(at.json[0].value)
+        _, cfg, _ = _run_ui(values)
+        for key in ("max_repos", "max_functions", "max_classes", "granularity", "export_ast"):
+            assert preview[key] == getattr(cfg, key), key
+
+
+class TestHomeConfigGoesThroughSIEVEConfig:
+    def test_every_field_the_ui_builds_is_a_config_field(self):
+        from unittest.mock import patch
+
+        from sieve.config import SIEVEConfig
+
+        seen = {}
+
+        def spy(**kwargs):
+            seen.update(kwargs)
+            return SIEVEConfig(**kwargs)      # extra="forbid" rejects any stale or misspelled key
+
+        with patch("sieve.config.SIEVEConfig", side_effect=spy):
+            _, cfg, _ = _run_ui({TGL_AST: True})
+        assert cfg is not None
+        assert seen and set(seen) <= set(SIEVEConfig.model_fields)
+
+    def test_config_rejects_the_old_ui_key(self):
+        from datetime import date
+
+        from pydantic import ValidationError
+
+        from sieve.config import SIEVEConfig
+
+        with pytest.raises(ValidationError):
+            SIEVEConfig(language="Python", start_date=date(2024, 1, 1), end_date=date(2025, 1, 1),
+                        export_full_ast=True)
+
+
+# ─── UI ↔ CLI parity ──────────────────────────────────────────────────────────
+
+_TOKENS = {"github_token", "hf_token"}
+
+# The UI's defaults differ from the CLI's (stars, contributors, caps), so every case spells them out.
+_CLI_BASE = ["--language", "Python", "--start-date", "2024-01-01",
+             "--min-stars", "50", "--min-contributors", "5"]
+_R20 = ["--max-repos", "20"]            # the UI's default repo cap
+
+_PARITY_CASES = [
+    pytest.param({}, ["--max-functions", "30", "--max-classes", "30", "--granularity", "both", *_R20], id="defaults"),
+    pytest.param({CHK_CLASSES: False},
+                 ["--granularity", "function", "--max-functions", "30", *_R20], id="functions-only"),
+    pytest.param({CHK_FUNCS: False, CAP_CLASSES: 7},
+                 ["--granularity", "class", "--max-classes", "7", *_R20], id="classes-only-capped"),
+    pytest.param({CHK_FUNCS: False, CAP_FUNCS: 50},       # disabled input's value is ignored
+                 ["--granularity", "class", "--max-classes", "30", *_R20], id="disabled-cap-ignored"),
+    pytest.param({CAP_REPOS: 0, CAP_FUNCS: 0, CAP_CLASSES: 0},
+                 ["--granularity", "both"], id="no-caps"),
+    pytest.param({CAP_REPOS: 3, CAP_FUNCS: 1, CAP_CLASSES: 0},
+                 ["--granularity", "both", "--max-functions", "1", "--max-repos", "3"], id="mixed-caps"),
+    pytest.param({TGL_AST: True},
+                 ["--max-functions", "30", "--max-classes", "30", "--export-ast", *_R20], id="export-ast"),
+    pytest.param({"Annotate LLM Score": True, "Engineered Projects Only": True},
+                 ["--max-functions", "30", "--max-classes", "30", "--annotate-llm-score", "--engineered-only", *_R20],
+                 id="llm-score-and-engineered"),
+    pytest.param({"Deduplicate": True, "Dedup Similarity Threshold": 0.9, "Export Format": "both"},
+                 ["--max-functions", "30", "--max-classes", "30", "--deduplicate",
+                  "--dedup-threshold", "0.9", "--export-format", "both", *_R20], id="dedup-and-both-formats"),
+    pytest.param({"Export Format": "parquet", CHK_CLASSES: False, TGL_AST: True, CAP_FUNCS: 0},
+                 ["--granularity", "function", "--export-ast", "--export-format", "parquet", *_R20],
+                 id="parquet-functions-ast"),
+]
+
+
+class TestUiCliParity:
+    @pytest.mark.parametrize("ui_values,cli_args", _PARITY_CASES)
+    def test_ui_config_equals_cli_config(self, ui_values, cli_args):
+        from unittest.mock import patch
+
+        from typer.testing import CliRunner
+
+        from sieve.cli import app
+
+        _, ui_cfg, _ = _run_ui(ui_values)
+        assert ui_cfg is not None
+
+        # The UI writes to a temp dir, so run the CLI against the same one.
+        args = ["run", *_CLI_BASE, *cli_args, "--output-dir", ui_cfg.output_dir]
+        with patch("sieve.cli.run_pipeline", return_value={
+            "total_repos_discovered": 0, "total_repos_processed": 0, "total_repos_failed": 0,
+            "total_functions": 0, "total_classes": 0, "failed_repos": [], "output_paths": {},
+        }) as pipeline:
+            result = CliRunner().invoke(app, args)
+        assert result.exit_code == 0, result.output
+        cli_cfg = pipeline.call_args[0][0]
+
+        assert ui_cfg.model_dump(exclude=_TOKENS) == cli_cfg.model_dump(exclude=_TOKENS)
 
 
 class TestHomeRejectedToken:
