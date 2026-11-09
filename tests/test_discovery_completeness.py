@@ -58,7 +58,7 @@ class FakeRepo:
         return []
 
     def get_contributors(self, anon=False):
-        return SimpleNamespace(totalCount=self._contributors)
+        return [SimpleNamespace(login=f"user{i}", type="User") for i in range(self._contributors)]
 
 
 def rate_limit_error(reset=RESET):
@@ -442,12 +442,9 @@ class TestSearchPayloadAndNames:
         from sieve.core.discovery import count_contributors
 
         repo = MagicMock()
-        repo.get_contributors.return_value.totalCount = 42
+        repo.get_contributors.return_value = [SimpleNamespace(login=f"u{i}", type="User") for i in range(42)]
         assert count_contributors(repo, None) == 42
         repo.get_contributors.assert_called_once_with(anon=False)
-
-        repo.get_contributors.side_effect = GithubException(403, "Forbidden")
-        assert count_contributors(repo, None) == 0
 
 
 class TestCppLanguageMapping:
@@ -514,6 +511,8 @@ class TestPipelineManifest:
             "slices": discovery["slices"],
             "truncated_windows": [],
             "incomplete_results": False,
+            "excluded": [],
+            "contributors_unknown": [],
         }
         assert discovery["slices"] > 1
 

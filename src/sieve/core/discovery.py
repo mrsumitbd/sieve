@@ -16,6 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Callable, Iterator, Optional, Union
 
+import requests
 from github import Auth, Github, GithubException
 from github.GithubException import BadCredentialsException, RateLimitExceededException
 from github.Repository import Repository
@@ -38,7 +39,7 @@ class RepoMetadata:
     full_name: str           # e.g. "owner/repo"
     url: str
     stars: int
-    contributors: int
+    contributors: Optional[int]   # None: GitHub would not list them (too many to count)
     last_commit_date: str    # ISO format
     default_branch: str
     license_spdx: Optional[str]
@@ -70,12 +71,23 @@ class DiscoveryReport:
                         {"start", "end", "total_count"} (ISO dates).
     incomplete_results: GitHub flagged at least one count as incomplete (the
                         search timed out, so results may be missing).
+    excluded:           Repositories dropped because their contributors could not
+                        be fetched (after retries). Each entry is
+                        {"repo", "reason"}. Any entry also makes `complete` False:
+                        the repository matched the search but was not evaluated.
+    contributors_unknown:
+                        Names of repositories kept although GitHub refused to
+                        list their contributors because the list is too large.
+                        They are recorded with contributors=None and pass any
+                        min_contributors threshold.
     """
     complete: bool = True
     total_matching: int = 0
     slices: int = 0
     truncated_windows: list = field(default_factory=list)
     incomplete_results: bool = False
+    excluded: list = field(default_factory=list)
+    contributors_unknown: list = field(default_factory=list)
 
 
 # Map language names to GitHub search query values. Names not listed here are
@@ -123,19 +135,96 @@ def build_query(
     )
 
 
-def count_contributors(repo: Repository, token: Union[str, SecretStr, None] = None) -> int:
+# Contributor counting retries transient errors this many times (so up to
+# 1 + CONTRIBUTOR_RETRIES requests), sleeping CONTRIBUTOR_BACKOFF_SECONDS * 2**n between them.
+CONTRIBUTOR_RETRIES = 3
+CONTRIBUTOR_BACKOFF_SECONDS = 0.5
+
+
+class ContributorCountError(Exception):
+    """The contributors of a repository could not be fetched (after retries)."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _is_bot(user) -> bool:
+    """GitHub App and automation accounts: login ending in "[bot]" or type "Bot"."""
+    login = getattr(user, "login", None)
+    if isinstance(login, str) and login.lower().endswith("[bot]"):
+        return True
+    return getattr(user, "type", None) == "Bot"
+
+
+def _is_contributors_too_large(exc: GithubException) -> bool:
+    """GitHub's 403 for repositories whose contributor list it will not produce."""
+    if exc.status != 403 or not isinstance(exc.data, dict):
+        return False
+    return "too large" in str(exc.data.get("message", "")).lower()
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Server errors and connection problems, which are worth another attempt."""
+    if isinstance(exc, GithubException):
+        return exc.status >= 500
+    return isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
+
+
+def _describe_error(exc: Exception, token: Union[str, SecretStr, None]) -> str:
+    """Short reason for the report; never contains the token."""
+    if isinstance(exc, GithubException):
+        message = exc.data.get("message") if isinstance(exc.data, dict) else exc.data
+        reason = f"HTTP {exc.status}: {message}" if message else f"HTTP {exc.status}"
+    else:
+        reason = f"{type(exc).__name__}: {exc}"
+    secret = reveal_secret(token)
+    return reason.replace(secret, "***") if secret else reason
+
+
+def count_contributors(
+    repo: Repository, token: Union[str, SecretStr, None] = None
+) -> Optional[int]:
     """
-    Fetch contributor count. Falls back to 0 on API errors.
-    The contributors endpoint is expensive — we cache via metadata snapshot.
+    Number of human contributors (bots excluded), counted exactly.
+
+    Bot accounts (login ending in "[bot]", or type "Bot") are regular
+    contributors as far as the API is concerned (anon=False only drops
+    anonymous, email-only ones), so they are skipped here. That needs the
+    list itself, not just its length: it is fetched 100 per page (the page
+    size of the client, see make_client). The value is recorded in the
+    manifest and read by the quality filter, so it is never cut short.
+
+    Returns None when GitHub refuses to list the contributors because the
+    list is too large: the repository clearly has many.
+
+    Raises:
+        RateLimitExceededException, BadCredentialsException: as GitHub reports them.
+        GitHubQuotaError: a rate limit reported as a bare 429 or a secondary 403.
+        ContributorCountError: any other error, after retrying transient ones
+            (5xx, connection errors) CONTRIBUTOR_RETRIES times.
     """
-    try:
-        # anon_contributors=False excludes bots, keeping count meaningful
-        return repo.get_contributors(anon=False).totalCount
-    except (RateLimitExceededException, BadCredentialsException):
-        raise
-    except GithubException as e:
-        logger.warning(f"Could not fetch contributors for {repo.full_name}: {e}")
-        return 0
+    attempt = 0
+    while True:
+        try:
+            return sum(1 for user in repo.get_contributors(anon=False) if not _is_bot(user))
+        except (RateLimitExceededException, BadCredentialsException):
+            raise
+        except GithubException as e:
+            if _is_contributors_too_large(e):
+                logger.info(f"{repo.full_name}: contributor list too large to fetch; count unknown")
+                return None
+            _raise_if_rate_limited(e, bool(reveal_secret(token)))
+            error: Exception = e
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            error = e
+
+        if not _is_transient(error) or attempt >= CONTRIBUTOR_RETRIES:
+            reason = _describe_error(error, token)
+            logger.warning(f"Could not fetch contributors for {repo.full_name}: {reason}")
+            raise ContributorCountError(reason) from error
+        time.sleep(CONTRIBUTOR_BACKOFF_SECONDS * 2 ** attempt)
+        attempt += 1
 
 
 # Kept so existing imports keep working.
@@ -238,11 +327,29 @@ def _to_metadata(
     language: str,
     min_contributors: int,
     github_token: Union[str, SecretStr, None],
+    report: Optional[DiscoveryReport] = None,
 ) -> Optional[RepoMetadata]:
-    """Fetch the per-repo details; None if the repo has too few contributors."""
-    # Contributor count check — this costs an extra API call per repo
-    contributor_count = count_contributors(repo, github_token)
-    if contributor_count < min_contributors:
+    """
+    Fetch the per-repo details; None if the repo is skipped.
+
+    A repo is skipped when it has too few contributors, or when its
+    contributors could not be fetched (recorded in report.excluded). A repo
+    whose contributor list is too large to fetch is kept with contributors=None
+    (recorded in report.contributors_unknown).
+    """
+    # Contributor count check — this costs at least one API call per repo
+    try:
+        contributor_count = count_contributors(repo, github_token)
+    except ContributorCountError as e:
+        if report is not None:
+            report.excluded.append({"repo": repo.full_name, "reason": e.reason})
+            report.complete = False
+        return None
+
+    if contributor_count is None:
+        if report is not None:
+            report.contributors_unknown.append(repo.full_name)
+    elif contributor_count < min_contributors:
         logger.debug(f"Skipping {repo.full_name}: {contributor_count} contributors < {min_contributors}")
         return None
 
@@ -259,7 +366,8 @@ def _to_metadata(
     if repo.license:
         license_spdx = repo.license.spdx_id
 
-    logger.info(f"Discovered: {repo.full_name} ({repo.stargazers_count} stars, {contributor_count} contributors)")
+    logger.info(f"Discovered: {repo.full_name} ({repo.stargazers_count} stars, "
+                f"{'unknown number of' if contributor_count is None else contributor_count} contributors)")
     return RepoMetadata(
         full_name=repo.full_name,
         url=repo.html_url,
@@ -314,7 +422,10 @@ def discover_repos(
                           came from.
         end_date:         Only include repos created on or before this date.
         min_stars:        Minimum star count
-        min_contributors: Minimum unique contributor count
+        min_contributors: Minimum unique contributor count (bots are not counted).
+                          A repository whose contributor list GitHub refuses to
+                          list because it is too large passes, with
+                          contributors=None.
         max_repos:        If set, stop after yielding this many repos (must be >= 0)
         github_token:     GitHub PAT. Without a token, GitHub allows 60 REST requests per hour and 10 search requests per minute.
         report:           Optional DiscoveryReport that is filled in as discovery
@@ -329,6 +440,10 @@ def discover_repos(
             propagate as RateLimitExceededException.
         GithubException: any other GitHub error. In every error case the report,
             if given, is marked incomplete.
+
+    A repository whose contributors cannot be fetched after retries is skipped
+    and listed in report.excluded; one with a too-large contributor list is
+    kept and listed in report.contributors_unknown.
     """
     if max_repos is not None and max_repos < 0:
         raise ValueError(f"max_repos must be >= 0 or None, got {max_repos}")
@@ -368,7 +483,7 @@ def _discover_single_query(
     yielded = scanned = 0
     for repo in _search(g, query, authenticated):
         scanned += 1
-        metadata = _to_metadata(repo, language, min_contributors, github_token)
+        metadata = _to_metadata(repo, language, min_contributors, github_token, report)
         if metadata is None:
             continue
         yield metadata
@@ -440,7 +555,7 @@ def _discover_windows(
 
     yielded = 0
     for repo in repos:
-        metadata = _to_metadata(repo, language, min_contributors, github_token)
+        metadata = _to_metadata(repo, language, min_contributors, github_token, report)
         if metadata is None:
             continue
         yield metadata

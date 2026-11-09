@@ -198,6 +198,10 @@ def _mock_repo(name):
     return repo
 
 
+def _users(n):
+    return [SimpleNamespace(login=f"user{i}", type="User") for i in range(n)]
+
+
 def _results(repos):
     results = MagicMock()
     results.__iter__.return_value = iter(repos)
@@ -248,7 +252,7 @@ def _gen(items, then_raise=None):
 class TestDiscoveryRateLimit:
     def test_rate_limit_in_contributor_count_is_not_swallowed(self):
         repos = [_mock_repo("a/one"), _mock_repo("a/two")]
-        repos[0].get_contributors.return_value.totalCount = 5
+        repos[0].get_contributors.return_value = _users(5)
         repos[1].get_contributors.side_effect = _limit_error()
 
         with patch("sieve.core.discovery.Github") as mock_gh, \
@@ -264,7 +268,7 @@ class TestDiscoveryRateLimit:
 
     def test_rate_limit_in_last_commit_lookup_is_not_swallowed(self):
         repo = _mock_repo("a/one")
-        repo.get_contributors.return_value.totalCount = 5
+        repo.get_contributors.return_value = _users(5)
         repo.get_commits.side_effect = _limit_error()
 
         with patch("sieve.core.discovery.Github") as mock_gh:

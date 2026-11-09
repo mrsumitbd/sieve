@@ -107,7 +107,7 @@ class RepoQualityMetrics:
     """Raw metrics for a single repo used in engineered project scoring."""
     full_name: str
     license_spdx: Optional[str]
-    contributor_count: int
+    contributor_count: Optional[int]   # None: too many for GitHub to list
     release_count: int
     pull_request_count: int
     issue_count: int
@@ -134,9 +134,14 @@ def _check_license(license_spdx: Optional[str]) -> bool:
 
 # ─── Stage 2: Hard exclusions ────────────────────────────────────────────────
 
-def _check_hard_exclusions(contributor_count: int, release_count: int) -> bool:
-    """Return True if repo passes Stage 2 hard exclusions."""
-    if contributor_count < 2:
+def _check_hard_exclusions(contributor_count: Optional[int], release_count: int) -> bool:
+    """
+    Return True if repo passes Stage 2 hard exclusions.
+
+    An unknown contributor count (None) means GitHub would not list the
+    contributors because there are too many, so it passes the minimum of 2.
+    """
+    if contributor_count is not None and contributor_count < 2:
         return False
     if release_count == 0:
         return False
@@ -299,7 +304,7 @@ def _count_treesitter(path: Path, language: str) -> tuple[int, int]:
 def collect_metrics(
     repo_full_name: str,
     license_spdx: Optional[str],
-    contributor_count: int,
+    contributor_count: Optional[int],
     repo_path: Optional[str],
     github_token: Union[str, SecretStr, None] = None,
 ) -> RepoQualityMetrics:
@@ -309,7 +314,8 @@ def collect_metrics(
     Args:
         repo_full_name: "owner/repo"
         license_spdx: SPDX license identifier from RepoMetadata
-        contributor_count: Already fetched during discovery
+        contributor_count: Already fetched during discovery (None if GitHub
+            would not list them: too many)
         repo_path: Path to cloned repo (for LOC counting). None = skip LOC.
         github_token: GitHub PAT for API calls
 
