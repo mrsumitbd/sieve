@@ -70,6 +70,13 @@ class TestGetContributorCount:
         mock_repo.get_contributors.assert_called_once_with(anon=False)
 
 
+def _set_total(mock_gh, total):
+    """Answer the raw total_count request that discovery makes when no cap <= 1000 applies."""
+    mock_gh.return_value.requester.requestJsonAndCheck.return_value = (
+        {}, {"total_count": total, "incomplete_results": False}
+    )
+
+
 class TestDiscoverRepos:
     """Tests for the discover_repos generator — GitHub API is fully mocked."""
 
@@ -100,8 +107,9 @@ class TestDiscoverRepos:
         mock_results.__iter__ = MagicMock(return_value=iter([mock_repo]))
 
         with patch("sieve.core.discovery.Github") as mock_gh, \
-             patch("sieve.core.discovery._get_contributor_count", return_value=10):
+             patch("sieve.core.discovery.count_contributors", return_value=10):
             mock_gh.return_value.search_repositories.return_value = mock_results
+            _set_total(mock_gh, 1)
             results = list(discover_repos(
                 language="Python",
                 start_date=date(2024, 1, 1),
@@ -122,8 +130,9 @@ class TestDiscoverRepos:
         mock_results.__iter__ = MagicMock(return_value=iter([mock_repo]))
 
         with patch("sieve.core.discovery.Github") as mock_gh, \
-             patch("sieve.core.discovery._get_contributor_count", return_value=2):
+             patch("sieve.core.discovery.count_contributors", return_value=2):
             mock_gh.return_value.search_repositories.return_value = mock_results
+            _set_total(mock_gh, 1)
             results = list(discover_repos(
                 language="Python",
                 start_date=date(2024, 1, 1),
@@ -142,7 +151,7 @@ class TestDiscoverRepos:
         mock_results.__iter__ = MagicMock(return_value=iter(repos))
 
         with patch("sieve.core.discovery.Github") as mock_gh, \
-             patch("sieve.core.discovery._get_contributor_count", return_value=10), \
+             patch("sieve.core.discovery.count_contributors", return_value=10), \
              patch("sieve.core.discovery.time.sleep"):
             mock_gh.return_value.search_repositories.return_value = mock_results
             results = list(discover_repos(
@@ -164,8 +173,9 @@ class TestDiscoverRepos:
         mock_results.__iter__ = MagicMock(return_value=iter([mock_repo]))
 
         with patch("sieve.core.discovery.Github") as mock_gh, \
-             patch("sieve.core.discovery._get_contributor_count", return_value=10):
+             patch("sieve.core.discovery.count_contributors", return_value=10):
             mock_gh.return_value.search_repositories.return_value = mock_results
+            _set_total(mock_gh, 1)
             results = list(discover_repos(
                 language="Python",
                 start_date=date(2024, 1, 1),
@@ -188,8 +198,9 @@ class TestDiscoverRepos:
         mock_results.__iter__ = MagicMock(return_value=iter([mock_repo]))
 
         with patch("sieve.core.discovery.Github") as mock_gh, \
-             patch("sieve.core.discovery._get_contributor_count", return_value=10):
+             patch("sieve.core.discovery.count_contributors", return_value=10):
             mock_gh.return_value.search_repositories.return_value = mock_results
+            _set_total(mock_gh, 1)
             results = list(discover_repos(
                 language="Python",
                 start_date=date(2024, 1, 1),
@@ -205,6 +216,7 @@ class TestDiscoverRepos:
         from github import GithubException
 
         with patch("sieve.core.discovery.Github") as mock_gh:
+            _set_total(mock_gh, 1)
             mock_gh.return_value.search_repositories.side_effect = GithubException(403, "rate limited")
             with pytest.raises(GithubException):
                 list(discover_repos(

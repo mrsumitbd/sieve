@@ -11,8 +11,9 @@ import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
+from sieve import __version__
 from sieve.core.extraction import FunctionRecord, ClassRecord
 from sieve.core.discovery import RepoMetadata
 
@@ -55,10 +56,16 @@ def write_manifest(
     function_count: int,
     class_count: int,
     output_dir: Path,
+    discovery: Optional[dict] = None,
 ) -> None:
-    """Write a JSON manifest capturing config, repo list, and summary stats."""
+    """
+    Write a JSON manifest capturing config, repo list, and summary stats.
+
+    discovery, when given, is stored under "discovery" (see DiscoveryReport) so
+    readers can tell whether the repo list covers everything that matched.
+    """
     manifest = {
-        "sieve_version": "0.1.0",
+        "sieve_version": __version__,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "config": config,
         "summary": {
@@ -68,6 +75,9 @@ def write_manifest(
         },
         "repos": repo_metadata_list,
     }
+    if discovery is not None:
+        manifest["discovery"] = discovery
+
     def _default(obj):
         """JSON serializer for types not handled by default."""
         if hasattr(obj, "isoformat"):   # date, datetime
@@ -88,6 +98,7 @@ def export_dataset(
     export_format: str,  # "jsonl", "parquet", "both"
     config: dict,
     repo_metadata_list: list[dict],
+    discovery: Optional[dict] = None,
 ) -> dict:
     """
     Export all extracted records to the output directory.
@@ -125,6 +136,7 @@ def export_dataset(
         function_count=len(functions),
         class_count=len(classes),
         output_dir=out,
+        discovery=discovery,
     )
     output_paths["manifest"] = str(out / "manifest.json")
 

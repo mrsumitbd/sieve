@@ -165,8 +165,8 @@ class TestTokenStillUsed:
         cfg = _cfg("github_token", output_dir=str(tmp_path / "out"))
         with patch("sieve.pipeline._fetch_quota", return_value=None), \
              patch("sieve.core.discovery.Github") as mock_gh:
-            mock_gh.return_value.search_repositories.return_value = MagicMock(
-                totalCount=0, __iter__=lambda self: iter([])
+            mock_gh.return_value.requester.requestJsonAndCheck.return_value = (
+                {}, {"total_count": 0, "incomplete_results": False}
             )
             run_pipeline(cfg)
 
@@ -178,8 +178,8 @@ class TestTokenStillUsed:
         cfg = SIEVEConfig(**_BASE, output_dir=str(tmp_path / "out"))
         with patch("sieve.pipeline._fetch_quota", return_value=None), \
              patch("sieve.core.discovery.Github") as mock_gh:
-            mock_gh.return_value.search_repositories.return_value = MagicMock(
-                totalCount=0, __iter__=lambda self: iter([])
+            mock_gh.return_value.requester.requestJsonAndCheck.return_value = (
+                {}, {"total_count": 0, "incomplete_results": False}
             )
             run_pipeline(cfg)
         assert mock_gh.call_args.kwargs["auth"] is None

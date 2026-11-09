@@ -29,7 +29,7 @@ from github.GithubException import BadCredentialsException, RateLimitExceededExc
 from pydantic import SecretStr
 
 from sieve.config import SIEVEConfig
-from sieve.core.discovery import discover_repos, make_client, RepoMetadata
+from sieve.core.discovery import discover_repos, make_client, DiscoveryReport, RepoMetadata
 from sieve.core.github_limits import (
     MIN_CALLS_REQUIRED,
     GitHubAuthError,
@@ -328,6 +328,7 @@ def run_pipeline(
             raise GitHubQuotaError(build_exhausted_message(quota.core_reset, authenticated))
 
     all_discovered: list[RepoMetadata] = []
+    discovery_report = DiscoveryReport()
     _last_progress_time = _time.time()
     try:
         for repo_meta in discover_repos(
@@ -338,6 +339,7 @@ def run_pipeline(
             min_contributors=config.min_contributors,
             max_repos=config.max_repos,
             github_token=config.github_token,
+            report=discovery_report,
         ):
             all_discovered.append(repo_meta)
             now = _time.time()
@@ -346,16 +348,32 @@ def run_pipeline(
                 _last_progress_time = now
     except BadCredentialsException as e:
         raise GitHubAuthError() from e
-    except RateLimitExceededException as e:
-        rate_limit_reset = reset_time_from_exception(e)
+    except (RateLimitExceededException, GitHubQuotaError) as e:
+        # GitHubQuotaError carries the original exception as its cause (and so the reset time).
+        limit = e.__cause__ if isinstance(e, GitHubQuotaError) else e
+        rate_limit_reset = reset_time_from_exception(limit) if limit is not None else None
         if not all_discovered:
+            if isinstance(e, GitHubQuotaError):
+                raise
             raise GitHubQuotaError(build_exhausted_message(rate_limit_reset, authenticated)) from e
         rate_limited = True
+        discovery_report.complete = False   # the manifest must not claim a full listing
         _progress(
             f"Warning: GitHub rate limit reached during discovery (resets at "
             f"{format_reset(rate_limit_reset)}). Results are partial: continuing with "
             f"the {len(all_discovered)} repositories found so far."
         )
+
+    problems = []
+    if discovery_report.truncated_windows:
+        problems.append(
+            f"{len(discovery_report.truncated_windows)} single-day window(s) hold more than 1000 "
+            "repositories (only the 1000 most-starred of each were collected)"
+        )
+    if discovery_report.incomplete_results:
+        problems.append("GitHub flagged some search results as incomplete")
+    if problems:
+        _progress(f"Warning: discovery is incomplete: {'; '.join(problems)}. See \"discovery\" in manifest.json.")
 
     total_discovered = len(all_discovered)
     _discovery_elapsed = _time.time() - _discovery_start
@@ -698,6 +716,7 @@ def run_pipeline(
         export_format=config.export_format,
         config=config.model_dump(mode="json"),
         repo_metadata_list=repo_metadata_list,
+        discovery=asdict(discovery_report),
     )
 
     _total_elapsed = _time.time() - _pipeline_start

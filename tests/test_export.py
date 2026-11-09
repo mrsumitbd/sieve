@@ -153,6 +153,15 @@ class TestManifest:
         manifest = json.loads(Path(paths["manifest"]).read_text())
         assert "sieve_version" in manifest
 
+    def test_manifest_sieve_version_matches_package(self, tmp_path, sample_records):
+        """The manifest must report the installed package version, never a stale literal."""
+        import sieve
+
+        funcs, classes = sample_records
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        manifest = json.loads(Path(paths["manifest"]).read_text())
+        assert manifest["sieve_version"] == sieve.__version__
+
     def test_both_format_writes_all_four_files(self, tmp_path, sample_records):
         funcs, classes = sample_records
         paths = export_dataset(funcs, classes, str(tmp_path), "both", _CONFIG, _REPO_META)
