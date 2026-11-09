@@ -69,6 +69,7 @@ def write_manifest(
     discovery: Optional[dict] = None,
     llm_score_truncated_count: int = 0,
     llm_scored_count: int = 0,
+    extraction: Optional[dict] = None,
 ) -> None:
     """
     Write a JSON manifest capturing config, repo list, and summary stats.
@@ -79,6 +80,10 @@ def write_manifest(
 
     discovery, when given, is stored under "discovery" (see DiscoveryReport) so
     readers can tell whether the repo list covers everything that matched.
+
+    extraction, when given, is stored under "extraction": the directory names
+    code extraction skips and how many source files that skipped, so readers
+    can tell what the corpus leaves out.
     """
     manifest = {
         "sieve_version": __version__,
@@ -95,6 +100,8 @@ def write_manifest(
     }
     if discovery is not None:
         manifest["discovery"] = discovery
+    if extraction is not None:
+        manifest["extraction"] = extraction
 
     def _default(obj):
         """JSON serializer for types not handled by default."""
@@ -117,6 +124,7 @@ def export_dataset(
     config: dict,
     repo_metadata_list: list[dict],
     discovery: Optional[dict] = None,
+    extraction: Optional[dict] = None,
 ) -> dict:
     """
     Export all extracted records to the output directory.
@@ -155,6 +163,7 @@ def export_dataset(
         class_count=len(classes),
         output_dir=out,
         discovery=discovery,
+        extraction=extraction,
         llm_score_truncated_count=count_llm_truncated(functions) + count_llm_truncated(classes),
         llm_scored_count=count_llm_scored(functions) + count_llm_scored(classes),
     )

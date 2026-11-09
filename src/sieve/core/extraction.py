@@ -11,10 +11,11 @@ Reuses the concept from OpenClassGen's extract_skeleton() but:
 """
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -1736,6 +1737,91 @@ LANGUAGE_EXTENSIONS = {
 }
 
 
+# Directories never entered during extraction: vendored third-party code, build
+# output and virtualenvs. Matched by exact, case-sensitive directory name on the
+# path relative to the repo root, at any depth. The walk prunes them, so their
+# contents are never listed.
+#
+# "external" and "env" are deliberately NOT here: both are ordinary names for
+# real source (a Java package called `env`, a project's own `external` module),
+# and skipping them would silently drop genuine code. Hidden directories are
+# not skipped as a class either; only the dot-names listed here are.
+EXTRACTION_SKIP_DIRS = frozenset({
+    "vendor", "vendored", "third_party", "third-party", "site-packages",
+    "node_modules", "dist", "build", "venv", ".venv", ".tox", ".eggs",
+})
+
+# Test directories, matched the same way (relative path, any depth).
+TEST_DIR_NAMES = frozenset({"test", "tests", "__tests__", "spec", "specs"})
+
+
+def _count_files_with_extensions(top: str, extensions: set[str]) -> int:
+    """Count files below top whose suffix is in extensions (listing only; nothing is read)."""
+    total = 0
+    for _, _, filenames in os.walk(top):
+        total += sum(1 for name in filenames if os.path.splitext(name)[1] in extensions)
+    return total
+
+
+def _iter_source_files(
+    root: Path,
+    extensions: set[str],
+    skipped: Optional[list[int]] = None,
+) -> Iterator[Path]:
+    """
+    Yield the candidate source files below root, in a deterministic order: the
+    files of a directory (sorted by name) first, then its subdirectories
+    (sorted by name), depth first.
+
+    Directories in EXTRACTION_SKIP_DIRS and TEST_DIR_NAMES are pruned in place,
+    judged on names *below* root only, so the directories above root (for
+    example a clone stored under a folder called "tests") never matter. The
+    walk never lists a pruned directory.
+
+    If skipped is given (a one-element list), the number of files with a
+    matching extension inside EXTRACTION_SKIP_DIRS subtrees is added to
+    skipped[0]. That is the only case in which a skipped tree is listed, and
+    it is for counting, not extraction. Files inside test directories are not
+    counted: they are not skipped because of the skip list.
+
+    Both count_repo_contents and extract_from_repo go through here so their
+    directory handling cannot drift apart.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        kept = []
+        for name in sorted(dirnames):
+            if name in TEST_DIR_NAMES:
+                continue
+            if name in EXTRACTION_SKIP_DIRS:
+                if skipped is not None:
+                    full = os.path.join(dirpath, name)
+                    if not os.path.islink(full):
+                        skipped[0] += _count_files_with_extensions(full, extensions)
+                continue
+            kept.append(name)
+        dirnames[:] = kept
+
+        for name in sorted(filenames):
+            if os.path.splitext(name)[1] not in extensions:
+                continue
+            file_path = Path(dirpath) / name
+            if file_path.is_file():
+                yield file_path
+
+
+def count_skipped_files(repo_path: str, language: str) -> int:
+    """
+    How many source files of this language sit inside EXTRACTION_SKIP_DIRS
+    subtrees of the repo, i.e. were passed over by extraction because of the
+    skip list. Used for the manifest. Lists the skipped trees (never reads the
+    files), which extraction itself does not.
+    """
+    skipped = [0]
+    for _ in _iter_source_files(Path(repo_path), LANGUAGE_EXTENSIONS.get(language, set()), skipped):
+        pass
+    return skipped[0]
+
+
 def extract_from_file(
     file_path: str,
     language: str,
@@ -1874,14 +1960,9 @@ def count_repo_contents(
 
     root = Path(repo_path)
 
-    for file_path in root.rglob("*"):
-        if not file_path.is_file():
-            continue
-        if file_path.suffix not in extensions:
-            continue
-        # Same test file exclusions as extract_from_repo
-        if any(p in file_path.parts for p in {"test", "tests", "__tests__", "spec", "specs"}):
-            continue
+    for file_path in _iter_source_files(root, extensions):
+        # Same test file exclusions as extract_from_repo (directories are
+        # handled by _iter_source_files)
         if file_path.name.startswith("test_") or file_path.name.endswith("_test.py"):
             continue
         if file_path.name.endswith(".test.js") or file_path.name.endswith(".spec.js"):
@@ -1961,18 +2042,13 @@ def extract_from_repo(
 
     root = Path(repo_path)
 
-    for file_path in root.rglob("*"):
+    for file_path in _iter_source_files(root, extensions):
         # Early stop if both caps reached
         if (func_cap is not None and len(all_functions) >= func_cap and
                 class_cap is not None and len(all_classes) >= class_cap):
             break
-        if not file_path.is_file():
-            continue
-        if file_path.suffix not in extensions:
-            continue
-        # Skip test files from the extraction corpus
-        if any(p in file_path.parts for p in {"test", "tests", "__tests__", "spec", "specs"}):
-            continue
+        # Skip test files from the extraction corpus (test and vendored
+        # directories are pruned by _iter_source_files)
         if file_path.name.startswith("test_") or file_path.name.endswith("_test.py"):
             continue
         if file_path.name.startswith("Test") or file_path.name.endswith("Test.java"):
