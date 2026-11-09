@@ -1754,6 +1754,52 @@ EXTRACTION_SKIP_DIRS = frozenset({
 # Test directories, matched the same way (relative path, any depth).
 TEST_DIR_NAMES = frozenset({"test", "tests", "__tests__", "spec", "specs"})
 
+# Test file name rules, judged on the file name only (never on its directories).
+# This is the single source of truth: Pass 1 (count_repo_contents) and Pass 2
+# (extract_from_repo) both select files through _iter_source_files, which calls
+# is_test_file, so the two cannot disagree about which files are eligible.
+#
+# The rules apply to every language; they are deliberately not scoped per
+# language, because that is what extraction has always done (a Python file
+# called TestApp.py or a C++ file called TestX.cpp has always been dropped).
+# ".test.ts" / ".spec.ts" cannot match an eligible file today (TypeScript is
+# not in LANGUAGE_EXTENSIONS) and are kept so the rule list stays complete.
+_TEST_FILE_PREFIXES = ("test_", "Test")
+_TEST_FILE_SUFFIXES = (
+    "_test.py",
+    "Test.java",
+    ".test.js", ".spec.js",
+    ".test.ts", ".spec.ts",
+    "_test.cpp", "_test.cc",
+)
+
+
+def is_test_file(path) -> bool:
+    """
+    True if the file name marks a test file that must be left out of the corpus.
+
+    Only the final path component is judged, case-sensitively. Test
+    *directories* are handled separately, by pruning in _iter_source_files.
+    """
+    name = os.path.basename(os.fspath(path))
+    return name.startswith(_TEST_FILE_PREFIXES) or name.endswith(_TEST_FILE_SUFFIXES)
+
+
+def _is_vendored_or_minified_js_name(relative_path: str) -> bool:
+    """JavaScript files dropped on their path alone: *.min.js, or anything with node_modules in the path."""
+    fp = relative_path.lower()
+    return fp.endswith(".min.js") or "node_modules" in fp
+
+
+def _looks_minified_js(source: str) -> bool:
+    """JavaScript dropped on its content: a line over 1000 characters, or an average line over 300."""
+    lines = source.splitlines()
+    if not lines:
+        return False
+    max_line = max(len(l) for l in lines)
+    avg_line = sum(len(l) for l in lines) / len(lines)
+    return max_line > 1000 or avg_line > 300
+
 
 def _count_files_with_extensions(top: str, extensions: set[str]) -> int:
     """Count files below top whose suffix is in extensions (listing only; nothing is read)."""
@@ -1767,9 +1813,10 @@ def _iter_source_files(
     root: Path,
     extensions: set[str],
     skipped: Optional[list[int]] = None,
+    language: Optional[str] = None,
 ) -> Iterator[Path]:
     """
-    Yield the candidate source files below root, in a deterministic order: the
+    Yield the eligible source files below root, in a deterministic order: the
     files of a directory (sorted by name) first, then its subdirectories
     (sorted by name), depth first.
 
@@ -1777,6 +1824,12 @@ def _iter_source_files(
     judged on names *below* root only, so the directories above root (for
     example a clone stored under a folder called "tests") never matter. The
     walk never lists a pruned directory.
+
+    Files are eligible when their extension is in extensions, they are not
+    test files (is_test_file) and, for language "JavaScript", they are not
+    vendored or minified by name (_is_vendored_or_minified_js_name). Content
+    based rules (minified JS) need the file text and are applied by the
+    callers through _looks_minified_js.
 
     If skipped is given (a one-element list), the number of files with a
     matching extension inside EXTRACTION_SKIP_DIRS subtrees is added to
@@ -1804,7 +1857,12 @@ def _iter_source_files(
         for name in sorted(filenames):
             if os.path.splitext(name)[1] not in extensions:
                 continue
+            if is_test_file(name):
+                continue
             file_path = Path(dirpath) / name
+            if language == "JavaScript" and _is_vendored_or_minified_js_name(
+                    str(file_path.relative_to(root))):
+                continue
             if file_path.is_file():
                 yield file_path
 
@@ -1855,17 +1913,12 @@ def extract_from_file(
 
     # ── Minification filter (JS only) ─────────────────────────────────────────
     if language == "JavaScript":
-        fp = stored_path.lower()
-        if fp.endswith(".min.js") or "node_modules" in fp:
+        if _is_vendored_or_minified_js_name(stored_path):
             logger.debug(f"Skipping minified/vendor JS: {stored_path}")
             return [], []
-        lines = source.splitlines()
-        if lines:
-            max_line = max((len(l) for l in lines), default=0)
-            avg_line = sum(len(l) for l in lines) / len(lines)
-            if max_line > 1000 or avg_line > 300:
-                logger.debug(f"Skipping minified JS (max_line={max_line}, avg={avg_line:.0f}): {stored_path}")
-                return [], []
+        if _looks_minified_js(source):
+            logger.debug(f"Skipping minified JS: {stored_path}")
+            return [], []
 
     try:
         if language == "Python":
@@ -1933,6 +1986,15 @@ def count_repo_contents(
     Lightweight pass 1: count extractable functions and classes in a repo
     without full extraction. Uses tree-sitter node counting only.
 
+    Pass 1 and Pass 2 (extract_from_repo) select the same files, because both
+    go through _iter_source_files. The counts can still differ from what the
+    extractors return on individual files, since this function counts raw node
+    types while the extractors walk the tree their own way (for example it
+    also counts methods of anonymous classes and C++ forward declarations,
+    and counts JavaScript `function` keyword tokens). That is a node-level
+    difference, not a file-selection one; see
+    tests/test_pass_consistency.py::TestKnownNodeLevelDivergences.
+
     Returns:
         (num_functions, num_classes)
     """
@@ -1960,27 +2022,16 @@ def count_repo_contents(
 
     root = Path(repo_path)
 
-    for file_path in _iter_source_files(root, extensions):
-        # Same test file exclusions as extract_from_repo (directories are
-        # handled by _iter_source_files)
-        if file_path.name.startswith("test_") or file_path.name.endswith("_test.py"):
-            continue
-        if file_path.name.endswith(".test.js") or file_path.name.endswith(".spec.js"):
-            continue
-        if file_path.name.endswith("_test.cpp") or file_path.name.endswith("_test.cc"):
-            continue
-
+    # File eligibility (skip dirs, test dirs, test file names, vendored JS
+    # names) is decided once, in _iter_source_files, which extract_from_repo
+    # uses as well.
+    for file_path in _iter_source_files(root, extensions, language=language):
         try:
             source = file_path.read_text(encoding="utf-8", errors="replace")
 
-            # Skip minified JS
-            if language == "JavaScript":
-                lines = source.splitlines()
-                if lines:
-                    max_line = max((len(l) for l in lines), default=0)
-                    avg_line = sum(len(l) for l in lines) / len(lines)
-                    if max_line > 1000 or avg_line > 300:
-                        continue
+            # Skip minified JS (same content rule as extract_from_file)
+            if language == "JavaScript" and _looks_minified_js(source):
+                continue
 
             parser = _get_parser(language)
             if parser is None:
@@ -2042,25 +2093,14 @@ def extract_from_repo(
 
     root = Path(repo_path)
 
-    for file_path in _iter_source_files(root, extensions):
+    # File eligibility (skip dirs, test dirs, test file names, vendored JS
+    # names) is decided once, in _iter_source_files, which count_repo_contents
+    # uses as well.
+    for file_path in _iter_source_files(root, extensions, language=language):
         # Early stop if both caps reached
         if (func_cap is not None and len(all_functions) >= func_cap and
                 class_cap is not None and len(all_classes) >= class_cap):
             break
-        # Skip test files from the extraction corpus (test and vendored
-        # directories are pruned by _iter_source_files)
-        if file_path.name.startswith("test_") or file_path.name.endswith("_test.py"):
-            continue
-        if file_path.name.startswith("Test") or file_path.name.endswith("Test.java"):
-            continue
-        if file_path.name.endswith(".test.js") or file_path.name.endswith(".spec.js"):
-            continue
-        if file_path.name.endswith(".test.ts") or file_path.name.endswith(".spec.ts"):
-            continue
-        if file_path.name.endswith("_test.cpp") or file_path.name.endswith("_test.cc"):
-            continue
-        if file_path.name.startswith("test_") and file_path.suffix in {".cpp", ".cc", ".h"}:
-            continue
 
         funcs, classes = extract_from_file(
             str(file_path),
