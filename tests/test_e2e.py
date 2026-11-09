@@ -648,10 +648,18 @@ class TestLLMScoreAnnotation:
     _REPOS = {"owner/repo": {"mod.py": _PYTHON_CODE}}
 
     @staticmethod
-    def _score(snippets, batch_size=64):
+    def _truncated(snippet):
+        # Depends only on the snippet, like the score, so a record carrying
+        # another record's flag is detectable. Roughly half the records are True.
+        return len(snippet) % 2 == 0
+
+    @classmethod
+    def _score(cls, snippets, batch_size=64):
         # Score depends only on the snippet, so a record carrying another
         # record's score is detectable.
-        return [len(snippet) / 1000 for snippet in snippets]
+        from sieve.models.classifier import ScoreResult
+        return [ScoreResult(len(snippet) / 1000, cls._truncated(snippet))
+                for snippet in snippets]
 
     def _config(self, tmp_path, annotate):
         return SIEVEConfig(
@@ -669,16 +677,93 @@ class TestLLMScoreAnnotation:
         assert len(records) == 4
         return records
 
-    def test_enabled_scores_every_record_with_its_own_score(self, tmp_path):
+    def _run_scored(self, tmp_path, score=None):
         classifier = MagicMock()
-        classifier.score_batch.side_effect = self._score
-
+        classifier.score_batch_detailed.side_effect = score or self._score
         with patch("sieve.models.classifier.LLMCodeClassifier.load",
                    return_value=classifier):
-            summary, _ = _run_on_repos(self._config(tmp_path, True), tmp_path, self._REPOS)
+            summary, messages = _run_on_repos(self._config(tmp_path, True), tmp_path, self._REPOS)
+        return summary, messages, classifier
+
+    def test_enabled_scores_every_record_with_its_own_score(self, tmp_path):
+        summary, _, _ = self._run_scored(tmp_path)
 
         for record in self._records(summary):
             assert record["llm_score"] == len(record["source_code"]) / 1000
+
+    def test_enabled_sets_truncated_flag_per_record(self, tmp_path):
+        summary, _, _ = self._run_scored(tmp_path)
+
+        flags = [r["llm_score_truncated"] for r in self._records(summary)]
+        assert all(isinstance(f, bool) for f in flags)
+        assert {True, False} <= set(flags)       # the fixture must exercise both values
+        for record in self._records(summary):
+            assert record["llm_score_truncated"] is self._truncated(record["source_code"])
+
+    def test_summary_and_manifest_count_truncated_records(self, tmp_path):
+        summary, _, _ = self._run_scored(tmp_path)
+
+        expected = sum(1 for r in self._records(summary) if r["llm_score_truncated"])
+        assert 0 < expected < 4
+        assert summary["total_llm_score_truncated"] == expected
+        assert summary["total_llm_scored"] == 4
+        manifest = json.loads(Path(summary["output_paths"]["manifest"]).read_text())
+        assert manifest["summary"]["total_llm_score_truncated"] == expected
+        assert manifest["summary"]["total_llm_scored"] == 4
+
+    def test_progress_message_reports_truncated_count(self, tmp_path):
+        summary, messages, _ = self._run_scored(tmp_path)
+        n = summary["total_llm_score_truncated"]
+        assert any("scoring complete" in m.lower() and f"{n} truncated" in m for m in messages)
+
+    def test_unscorable_record_has_null_score_and_null_flag(self, tmp_path):
+        from sieve.models.classifier import ScoreResult
+
+        def score(snippets, batch_size=64):
+            return [None if i == 0 else ScoreResult(0.5, True) for i, _ in enumerate(snippets)]
+
+        summary, _, _ = self._run_scored(tmp_path, score)
+        records = self._records(summary)
+        assert sum(r["llm_score"] is None for r in records) == 1
+        for r in records:
+            assert (r["llm_score_truncated"] is None) == (r["llm_score"] is None)
+        assert summary["total_llm_score_truncated"] == 3
+
+    def test_partially_scored_run_counts_only_scored_records(self, tmp_path):
+        """Records whose scoring yielded None are not counted — in summary or manifest."""
+        from sieve.models.classifier import ScoreResult
+
+        def score(snippets, batch_size=64):
+            # Leave the 1st and 3rd records unscored; the rest are scored, one truncated.
+            return [None if i in (0, 2) else ScoreResult(0.25, i == 1)
+                    for i, _ in enumerate(snippets)]
+
+        summary, messages, _ = self._run_scored(tmp_path, score)
+        records = self._records(summary)
+        scored = [r for r in records if r["llm_score"] is not None]
+        assert len(scored) == 2 and len(records) == 4
+
+        assert summary["total_llm_scored"] == 2
+        assert summary["total_llm_score_truncated"] == 1
+        manifest = json.loads(Path(summary["output_paths"]["manifest"]).read_text())
+        assert manifest["summary"]["total_llm_scored"] == 2
+        assert manifest["summary"]["total_llm_score_truncated"] == 1
+        # the counts agree with what was actually written to disk
+        assert summary["total_llm_scored"] == sum(r["llm_score"] is not None for r in records)
+        assert summary["total_llm_score_truncated"] == sum(r["llm_score_truncated"] is True for r in records)
+        assert any("2/4 records scored" in m for m in messages)
+
+    def test_nothing_scored_when_every_result_is_none(self, tmp_path):
+        summary, _, _ = self._run_scored(tmp_path, lambda snippets, batch_size=64: [None] * len(snippets))
+        assert summary["total_llm_scored"] == 0
+        assert summary["total_llm_score_truncated"] == 0
+        manifest = json.loads(Path(summary["output_paths"]["manifest"]).read_text())
+        assert manifest["summary"]["total_llm_scored"] == 0
+
+    def test_pipeline_uses_the_detailed_scoring_path_with_batch_size_64(self, tmp_path):
+        _, _, classifier = self._run_scored(tmp_path)
+        classifier.score_batch_detailed.assert_called_once()
+        assert classifier.score_batch_detailed.call_args.kwargs.get("batch_size") == 64
 
     def test_disabled_leaves_scores_unset_and_never_loads_model(self, tmp_path):
         with patch("sieve.models.classifier.LLMCodeClassifier.load") as load:
@@ -686,6 +771,11 @@ class TestLLMScoreAnnotation:
 
         load.assert_not_called()
         assert all(r["llm_score"] is None for r in self._records(summary))
+        assert all(r["llm_score_truncated"] is None for r in self._records(summary))
+        assert summary["total_llm_score_truncated"] == 0
+        assert summary["total_llm_scored"] == 0
+        manifest = json.loads(Path(summary["output_paths"]["manifest"]).read_text())
+        assert manifest["summary"]["total_llm_scored"] == 0
 
     def test_model_load_failure_continues_without_scores(self, tmp_path):
         with patch("sieve.models.classifier.LLMCodeClassifier.load",
@@ -693,7 +783,20 @@ class TestLLMScoreAnnotation:
             summary, messages = _run_on_repos(self._config(tmp_path, True), tmp_path, self._REPOS)
 
         assert all(r["llm_score"] is None for r in self._records(summary))
+        assert all(r["llm_score_truncated"] is None for r in self._records(summary))
+        assert summary["total_llm_score_truncated"] == 0
+        assert summary["total_llm_scored"] == 0
         assert any("LLM scoring failed" in m and "Model unavailable" in m for m in messages)
+
+    def test_scoring_failure_midway_leaves_no_partial_flags(self, tmp_path):
+        def boom(snippets, batch_size=64):
+            raise RuntimeError("CUDA out of memory")
+
+        summary, messages, _ = self._run_scored(tmp_path, boom)
+        assert all(r["llm_score"] is None and r["llm_score_truncated"] is None
+                   for r in self._records(summary))
+        assert summary["total_llm_scored"] == 0
+        assert any("LLM scoring failed" in m and "out of memory" in m for m in messages)
 
 
 # ─── Phase 4b: final safety-net cap (NOT Pass 3 — separate mechanism) ────────

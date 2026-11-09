@@ -20,6 +20,13 @@ from sieve.cli import app
 
 runner = CliRunner()
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(output: str) -> str:
+    """Strip colour codes: under FORCE_COLOR=1 rich wraps every table cell in them."""
+    return _ANSI.sub("", output)
+
 # ─── Minimal pipeline summary returned by the mock ────────────────────────────
 
 _FAKE_SUMMARY = {
@@ -63,6 +70,44 @@ class TestRunCommand:
             ])
         assert "Functions Extracted" in result.output
         assert "12" in result.output
+
+    def test_run_shows_truncated_count_when_annotating(self):
+        summary = {**_FAKE_SUMMARY, "total_llm_score_truncated": 5, "total_llm_scored": 11}
+        with patch("sieve.cli.run_pipeline", return_value=summary):
+            result = runner.invoke(app, [
+                "run", "--language", "Python",
+                "--start-date", "2024-01-01", "--end-date", "2025-01-01",
+                "--annotate-llm-score",
+            ])
+        assert result.exit_code == 0
+        out = _plain(result.output)
+        assert len([l for l in out.splitlines() if "LLM Scores Truncated" in l]) == 1
+        assert len([l for l in out.splitlines() if "LLM Records Scored" in l]) == 1
+        assert re.search(r"LLM Records Scored\s*[│|]\s*11\s*[│|]", out)
+        assert re.search(r"LLM Scores Truncated\s*[│|]\s*5\s*[│|]", out)
+
+    def test_run_hides_truncated_row_without_annotation(self):
+        summary = {**_FAKE_SUMMARY, "total_llm_score_truncated": 0, "total_llm_scored": 0}
+        with patch("sieve.cli.run_pipeline", return_value=summary):
+            result = runner.invoke(app, [
+                "run", "--language", "Python",
+                "--start-date", "2024-01-01", "--end-date", "2025-01-01",
+            ])
+        assert result.exit_code == 0
+        assert "Truncated" not in _plain(result.output)
+        assert "LLM Records Scored" not in _plain(result.output)
+
+    def test_run_tolerates_summary_without_truncated_key(self):
+        with patch("sieve.cli.run_pipeline", return_value=_FAKE_SUMMARY):
+            result = runner.invoke(app, [
+                "run", "--language", "Python",
+                "--start-date", "2024-01-01", "--end-date", "2025-01-01",
+                "--annotate-llm-score",
+            ])
+        assert result.exit_code == 0
+        assert "Functions Extracted" in result.output
+        # rich draws the value in the cell after the label; a missing key must show 0
+        assert re.search(r"LLM Records Scored\s*[│|]\s*0\s*[│|]", _plain(result.output))
 
     def test_run_shows_output_paths(self):
         with patch("sieve.cli.run_pipeline", return_value=_FAKE_SUMMARY):

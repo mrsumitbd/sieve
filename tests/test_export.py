@@ -19,13 +19,13 @@ FUNCTION_COLUMNS = {
     "repo", "file_path", "language", "func_name", "parameters",
     "return_annotation", "docstring", "source_code", "signature",
     "used_imports", "start_line", "end_line", "is_method",
-    "parent_class", "decorators", "llm_score",
+    "parent_class", "decorators", "llm_score", "llm_score_truncated",
 }
 CLASS_COLUMNS = {
     "repo", "file_path", "language", "class_name", "parent_classes",
     "method_names", "method_count", "has_constructor", "docstring",
     "source_code", "skeleton", "decorators", "used_imports",
-    "start_line", "end_line", "llm_score",
+    "start_line", "end_line", "llm_score", "llm_score_truncated",
 }
 
 _SAMPLE_CODE = """
@@ -178,3 +178,114 @@ class TestManifest:
         with patch.dict(sys.modules, {"polars": None}):
             with pytest.raises(Exception):
                 export_dataset(funcs, classes, str(tmp_path / "out"), "parquet", _CONFIG, _REPO_META)
+
+
+
+# ─── llm_score_truncated ──────────────────────────────────────────────────────
+
+def _scored(records, flags):
+    """Give each record a score and the next truncation flag (None = not scored)."""
+    for rec, flag in zip(records, flags):
+        rec.llm_score = None if flag is None else 0.5
+        rec.llm_score_truncated = flag
+    return records
+
+
+class TestLlmScoreTruncatedExport:
+    def test_unscored_records_export_null(self, tmp_path, sample_records):
+        funcs, classes = sample_records
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        rows = [json.loads(l) for l in Path(paths["functions_jsonl"]).read_text().splitlines() if l]
+        assert rows and all(r["llm_score_truncated"] is None for r in rows)
+
+    def test_jsonl_preserves_true_false_null(self, tmp_path, sample_records):
+        funcs, classes = sample_records
+        flags = [True, False, None, True, False][:len(funcs)]
+        _scored(funcs, flags)
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        rows = [json.loads(l) for l in Path(paths["functions_jsonl"]).read_text().splitlines() if l]
+        assert [r["llm_score_truncated"] for r in rows] == flags
+
+    def test_parquet_column_is_nullable_boolean(self, tmp_path, sample_records):
+        pl = pytest.importorskip("polars")
+        funcs, classes = sample_records
+        flags = [True, False, None, True, False][:len(funcs)]
+        _scored(funcs, flags)
+        paths = export_dataset(funcs, classes, str(tmp_path), "parquet", _CONFIG, _REPO_META)
+        df = pl.read_parquet(paths["functions_parquet"])
+        assert df.schema["llm_score_truncated"] == pl.Boolean
+        assert df["llm_score_truncated"].to_list() == flags
+
+    def test_parquet_all_unscored_still_writes_and_reads(self, tmp_path, sample_records):
+        pl = pytest.importorskip("polars")
+        funcs, classes = sample_records
+        paths = export_dataset(funcs, classes, str(tmp_path), "parquet", _CONFIG, _REPO_META)
+        df = pl.read_parquet(paths["classes_parquet"])
+        assert df["llm_score_truncated"].null_count() == len(classes)
+
+    def test_manifest_counts_only_true(self, tmp_path, sample_records):
+        funcs, classes = sample_records
+        _scored(funcs, [True, False, None, True, True][:len(funcs)])
+        _scored(classes, [True, False][:len(classes)])
+        expected = sum(1 for r in funcs + classes if r.llm_score_truncated is True)
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        manifest = json.loads(Path(paths["manifest"]).read_text())
+        assert manifest["summary"]["total_llm_score_truncated"] == expected
+        assert expected > 0
+
+    def test_manifest_count_is_zero_when_nothing_scored(self, tmp_path, sample_records):
+        funcs, classes = sample_records
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        manifest = json.loads(Path(paths["manifest"]).read_text())
+        assert manifest["summary"]["total_llm_score_truncated"] == 0
+
+    def test_manifest_keeps_existing_summary_keys(self, tmp_path, sample_records):
+        funcs, classes = sample_records
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        summary = json.loads(Path(paths["manifest"]).read_text())["summary"]
+        assert {"total_repos", "total_functions", "total_classes"} <= set(summary)
+        assert {"total_llm_scored", "total_llm_score_truncated"} <= set(summary)
+
+
+# ─── total_llm_scored ─────────────────────────────────────────────────────────
+
+class TestLlmScoredCount:
+    def test_counts_records_with_a_non_null_score(self, tmp_path, sample_records):
+        funcs, classes = sample_records
+        _scored(funcs, [True, None, False, None, False][:len(funcs)])
+        _scored(classes, [None, False][:len(classes)])
+        expected = sum(1 for r in funcs + classes if r.llm_score is not None)
+        assert 0 < expected < len(funcs) + len(classes)      # some scored, some not
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        manifest = json.loads(Path(paths["manifest"]).read_text())
+        assert manifest["summary"]["total_llm_scored"] == expected
+
+    def test_zero_when_nothing_scored(self, tmp_path, sample_records):
+        funcs, classes = sample_records
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        manifest = json.loads(Path(paths["manifest"]).read_text())
+        assert manifest["summary"]["total_llm_scored"] == 0
+
+    def test_score_of_zero_still_counts_as_scored(self, tmp_path, sample_records):
+        """0.0 is a real score; only None means unscored."""
+        funcs, classes = sample_records
+        for r in funcs + classes:
+            r.llm_score, r.llm_score_truncated = 0.0, False
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        manifest = json.loads(Path(paths["manifest"]).read_text())
+        assert manifest["summary"]["total_llm_scored"] == len(funcs) + len(classes)
+
+    def test_truncated_never_exceeds_scored(self, tmp_path, sample_records):
+        funcs, classes = sample_records
+        _scored(funcs, [True, True, None, True, False][:len(funcs)])
+        paths = export_dataset(funcs, classes, str(tmp_path), "jsonl", _CONFIG, _REPO_META)
+        summary = json.loads(Path(paths["manifest"]).read_text())["summary"]
+        assert summary["total_llm_score_truncated"] <= summary["total_llm_scored"]
+
+    def test_helper_counts_non_null_scores(self, sample_records):
+        from sieve.core.export import count_llm_scored
+        funcs, classes = sample_records
+        assert count_llm_scored(funcs + classes) == 0
+        _scored(funcs, [False, None, False, None, False][:len(funcs)])
+        assert count_llm_scored(funcs) == sum(1 for r in funcs if r.llm_score is not None)
+        assert count_llm_scored([]) == 0

@@ -3,8 +3,9 @@ tests/test_classifier.py
 
 Unit tests for sieve.models.classifier.LLMCodeClassifier.
 
-All tests mock torch/transformers so no GPU or model weights are needed
-in CI — the classifier logic and interface are tested in isolation.
+No GPU, network or real model weights are needed: loading is mocked, and
+scoring runs on a tiny local model (tests/tiny_roberta.py). The batching,
+truncation and device tests live in test_classifier_batching.py.
 """
 
 import sys
@@ -128,31 +129,30 @@ class TestScore:
 
 # ── score_batch ───────────────────────────────────────────────────────────────
 
-torch = pytest.importorskip("torch", reason="torch not installed — skipping score_batch tests")
+# Only TestScoreBatch needs torch; a module-level importorskip would also skip
+# the torch-free tests above and below it.
+try:
+    import torch
+except ImportError:                                  # pragma: no cover
+    torch = None
 
+requires_torch = pytest.mark.skipif(
+    torch is None, reason="torch not installed — skipping score_batch tests"
+)
+
+
+@requires_torch
 class TestScoreBatch:
+    """
+    Behavioural contract of score_batch, exercised on the tiny local model
+    (tests/tiny_roberta.py) instead of mocked tensors — the mocks hard-coded
+    512-wide inputs, which dynamic padding deliberately no longer produces.
+    """
+
     def _make_loaded_clf(self, tmp_path):
-        """Create a classifier with mocked torch internals."""
-        clf = _make_classifier(tmp_path)
-        clf._loaded  = True
-        clf._device  = torch.device("cpu")
-
-        # Mock tokenizer
-        mock_enc = MagicMock()
-        mock_enc.__getitem__ = lambda self, key: torch.zeros(1, 512, dtype=torch.long)
-        mock_tokenizer = MagicMock()
-        mock_tokenizer.return_value = {
-            "input_ids":      torch.zeros(1, 512, dtype=torch.long),
-            "attention_mask": torch.ones(1, 512, dtype=torch.long),
-        }
-        clf._tokenizer = mock_tokenizer
-
-        # Mock model — returns logits
-        mock_model = MagicMock()
-        mock_model.return_value = torch.tensor([0.5])
-        clf._model = mock_model
-
-        return clf
+        pytest.importorskip("transformers", reason="transformers not installed")
+        import tiny_roberta
+        return tiny_roberta.make_classifier(tmp_path)
 
     def test_empty_list_returns_empty(self, tmp_path):
         clf = _make_classifier(tmp_path)
@@ -163,58 +163,38 @@ class TestScoreBatch:
     def test_none_for_empty_snippets(self, tmp_path):
         clf = self._make_loaded_clf(tmp_path)
         results = clf.score_batch(["", "   ", None])
-        assert all(r is None for r in results)
+        assert results == [None, None, None]
 
     def test_length_matches_input(self, tmp_path):
         clf = self._make_loaded_clf(tmp_path)
-
-        clf._tokenizer.return_value = {
-            "input_ids":      torch.zeros(3, 512, dtype=torch.long),
-            "attention_mask": torch.ones(3, 512, dtype=torch.long),
-        }
-        clf._model.return_value = torch.tensor([0.1, 0.5, 0.9])
-
-        snippets = ["def a(): pass", "def b(): pass", "def c(): pass"]
+        snippets = ["w1 w2", "w3 w4 w5", "w6"]
         results = clf.score_batch(snippets)
         assert len(results) == 3
 
     def test_scores_are_floats_in_unit_interval(self, tmp_path):
         clf = self._make_loaded_clf(tmp_path)
-
-        clf._tokenizer.return_value = {
-            "input_ids":      torch.zeros(2, 512, dtype=torch.long),
-            "attention_mask": torch.ones(2, 512, dtype=torch.long),
-        }
-        clf._model.return_value = torch.tensor([2.0, -1.0])  # logits outside [0,1]
-
-        results = clf.score_batch(["code1", "code2"])
+        results = clf.score_batch(["w1 w2 w3", "w9 w8"])
         assert all(isinstance(r, float) for r in results)
         assert all(0.0 <= r <= 1.0 for r in results)
 
     def test_mixed_empty_and_valid(self, tmp_path):
         clf = self._make_loaded_clf(tmp_path)
-
-        clf._tokenizer.return_value = {
-            "input_ids":      torch.zeros(1, 512, dtype=torch.long),
-            "attention_mask": torch.ones(1, 512, dtype=torch.long),
-        }
-        clf._model.return_value = torch.tensor([0.8])
-
-        results = clf.score_batch(["", "def foo(): pass"])
+        results = clf.score_batch(["", "w1 w2 w3"])
         assert results[0] is None
         assert isinstance(results[1], float)
 
     def test_scores_are_rounded_to_4_decimal_places(self, tmp_path):
         clf = self._make_loaded_clf(tmp_path)
+        results = clf.score_batch(["w1 w2 w3", "w4 w5"])
+        assert all(r == round(r, 4) for r in results)
 
-        clf._tokenizer.return_value = {
-            "input_ids":      torch.zeros(1, 512, dtype=torch.long),
-            "attention_mask": torch.ones(1, 512, dtype=torch.long),
-        }
-        clf._model.return_value = torch.tensor([0.123456789])
-
-        results = clf.score_batch(["def foo(): pass"])
-        assert results[0] == round(results[0], 4)
+    def test_scores_are_sigmoid_of_the_model_logit(self, tmp_path):
+        """The score is P = sigmoid(logit), not the raw logit."""
+        clf = self._make_loaded_clf(tmp_path)
+        enc = clf._tokenizer(["w1 w2 w3"], return_tensors="pt")
+        with torch.no_grad():
+            logit = clf._model(enc["input_ids"], enc["attention_mask"])
+        assert clf.score_batch(["w1 w2 w3"])[0] == round(float(torch.sigmoid(logit)), 4)
 
 
 # ── Pipeline Phase 5 integration ─────────────────────────────────────────────
@@ -274,3 +254,23 @@ class TestPipelinePhase5:
         cls = self._make_class_record()
         assert hasattr(cls, "llm_score")
         assert cls.llm_score is None
+
+
+    def test_llm_score_truncated_defaults_to_none_on_function_record(self):
+        func = self._make_function_record()
+        assert hasattr(func, "llm_score_truncated")
+        assert func.llm_score_truncated is None
+
+    def test_llm_score_truncated_defaults_to_none_on_class_record(self):
+        cls = self._make_class_record()
+        assert hasattr(cls, "llm_score_truncated")
+        assert cls.llm_score_truncated is None
+
+    def test_llm_score_truncated_is_exported_next_to_llm_score(self):
+        from dataclasses import asdict, fields
+        from sieve.core.extraction import FunctionRecord, ClassRecord
+        for rec_cls, rec in ((FunctionRecord, self._make_function_record()),
+                             (ClassRecord, self._make_class_record())):
+            names = [f.name for f in fields(rec_cls)]
+            assert names.index("llm_score_truncated") == names.index("llm_score") + 1
+            assert "llm_score_truncated" in asdict(rec)

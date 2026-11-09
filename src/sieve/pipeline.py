@@ -46,7 +46,7 @@ from sieve.core.github_limits import (
 from sieve.core.detection import detect_test_suite
 from sieve.core.extraction import extract_from_repo, count_repo_contents, FunctionRecord, ClassRecord
 from sieve.core.deduplication import deduplicate
-from sieve.core.export import export_dataset
+from sieve.core.export import count_llm_scored, count_llm_truncated, export_dataset
 from sieve.core.quality import collect_metrics, apply_filters, RepoQualityMetrics
 
 logger = logging.getLogger(__name__)
@@ -715,13 +715,18 @@ def run_pipeline(
             _progress(f"Scoring {total_records} records with LLM classifier...")
 
             snippets = [r.source_code for r in all_records]
-            scores   = clf.score_batch(snippets, batch_size=64)
+            results  = clf.score_batch_detailed(snippets, batch_size=64)
 
-            for record, score in zip(all_records, scores):
-                record.llm_score = score
+            for record, result in zip(all_records, results):
+                record.llm_score           = None if result is None else result.score
+                record.llm_score_truncated = None if result is None else result.truncated
 
-            scored = sum(1 for s in scores if s is not None)
-            _progress(f"LLM scoring complete — {scored}/{total_records} records scored.")
+            scored    = sum(1 for r in results if r is not None)
+            truncated = sum(1 for r in results if r is not None and r.truncated)
+            _progress(
+                f"LLM scoring complete — {scored}/{total_records} records scored, "
+                f"{truncated} truncated to the first 512 tokens."
+            )
         except Exception as e:
             _progress(f"LLM scoring failed — {e}. Continuing without scores.")
 
@@ -780,6 +785,10 @@ def run_pipeline(
         "total_repos_failed": len(failed_repos),
         "total_functions": len(all_functions),
         "total_classes": len(all_classes),
+        "total_llm_scored": count_llm_scored(all_functions) + count_llm_scored(all_classes),
+        "total_llm_score_truncated": (
+            count_llm_truncated(all_functions) + count_llm_truncated(all_classes)
+        ),
         "elapsed_seconds": round(_total_elapsed, 1),
         "pipeline_summary": _summary_msg,
         "failed_repos": failed_repos,

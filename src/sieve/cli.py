@@ -190,6 +190,9 @@ def run(
     table.add_row("Repos Failed",      str(summary["total_repos_failed"]))
     table.add_row("Functions Extracted", str(summary["total_functions"]))
     table.add_row("Classes Extracted",   str(summary["total_classes"]))
+    if config.annotate_llm_score:
+        table.add_row("LLM Records Scored",   str(summary.get("total_llm_scored", 0)))
+        table.add_row("LLM Scores Truncated", str(summary.get("total_llm_score_truncated", 0)))
     console.print(table)
 
     if summary.get("rate_limited"):
