@@ -45,6 +45,11 @@ _LANG_HIGHLIGHT = {
 }
 
 
+def _cap_or_none(value) -> "int | None":
+    """A cap widget value to a SIEVEConfig cap: 0 means no cap (None), otherwise the integer (>= 1)."""
+    return int(value) if value > 0 else None
+
+
 def _build_zip(output_paths: dict) -> bytes:
     """Bundle all output files into a ZIP for download."""
     buf = BytesIO()
@@ -138,13 +143,21 @@ with st.sidebar:
     min_stars        = st.number_input("Minimum Stars",        min_value=0, value=50,  step=10)
     min_contributors = st.number_input("Minimum Contributors", min_value=1, value=5,   step=1)
     max_repos        = st.number_input("Max Repos (0 = no cap)",      min_value=0, value=20,  step=10)
+
+    st.subheader("Extraction")
+    extract_functions = st.checkbox("Extract functions", value=True)
+    extract_classes   = st.checkbox("Extract classes", value=True)
+    if not (extract_functions or extract_classes):
+        st.error("At least one of Extract functions and Extract classes must be checked.")
     max_functions    = st.number_input(
-        "Max Functions (-1 = skip, 0 = no cap)", min_value=-1, value=30, step=10,
-        help="Cap on total extracted functions. Set to -1 to skip function extraction entirely.",
+        "Max Functions (0 = no cap)", min_value=0, value=30, step=10,
+        disabled=not extract_functions,
+        help="Cap on total extracted functions. 0 = no cap. Disabled when 'Extract functions' is unchecked.",
     )
     max_classes = st.number_input(
-        "Max Classes (-1 = skip, 0 = no cap)", min_value=-1, value=30, step=10,
-        help="Cap on total extracted classes. Set to -1 to skip class extraction entirely.",
+        "Max Classes (0 = no cap)", min_value=0, value=30, step=10,
+        disabled=not extract_classes,
+        help="Cap on total extracted classes. 0 = no cap. Disabled when 'Extract classes' is unchecked.",
     )
 
     st.subheader("Content Filters")
@@ -176,21 +189,14 @@ with st.sidebar:
         ),
     )
     export_ast = st.toggle(
-        "Export AST-Derived Features", value=False,
+        "Export Full AST", value=False,
         help=(
-            "Include AST-derived structural features — parse tree depth, "
-            "node count, and node type distribution — in every exported record."
+            "Include the complete parse tree as nested JSON in every record. "
+            "Significantly increases file size — use with small corpora. "
+            "The AST-derived summary features (parse tree depth, node count and "
+            "node type distribution) are always exported, whatever this is set to."
         ),
     )
-    export_full_ast = st.toggle(
-        "Include Full AST in Export", value=False,
-        disabled=not export_ast,
-        help=(
-            "Include the complete parse tree as nested JSON in each record. "
-            "Only available when 'Export AST-Derived Features' is enabled. "
-            "Significantly increases file size — use with small corpora."
-        ),
-    ) if export_ast else False
 
     st.subheader("Processing")
     deduplicate_flag = st.toggle("Deduplicate", value=False)
@@ -227,18 +233,20 @@ with st.sidebar:
     )
 
 
+# ─── Widget values → SIEVEConfig values ───────────────────────────────────────
+# Same semantics as the CLI: a cap is None (no cap) or >= 1, and a level that is
+# not extracted carries no cap. Zero and negative numbers never reach the config.
+
+granularity = (["function"] if extract_functions else []) + (["class"] if extract_classes else [])
+cap_repos     = _cap_or_none(max_repos)
+cap_functions = _cap_or_none(max_functions) if extract_functions else None
+cap_classes   = _cap_or_none(max_classes)   if extract_classes   else None
+
 # ─── Pipeline Execution ───────────────────────────────────────────────────────
 
 if run_button:
-    # Derive granularity from max values: -1 means skip that granularity
-    granularity = []
-    if int(max_functions) != -1:
-        granularity.append("function")
-    if int(max_classes) != -1:
-        granularity.append("class")
-
     if not granularity:
-        st.error("Both Max Functions and Max Classes are set to -1. At least one granularity must be enabled.")
+        st.error("At least one of Extract functions and Extract classes must be checked.")
     else:
         # Clear previous run state before starting new run
         st.session_state.pipeline_log = []
@@ -253,13 +261,13 @@ if run_button:
                 end_date=end_date,
                 min_stars=int(min_stars),
                 min_contributors=int(min_contributors),
-                max_repos=int(max_repos)         if max_repos     > 0 else None,
-                max_functions=int(max_functions) if max_functions > 0 else None,
-                max_classes=int(max_classes)     if max_classes   > 0 else None,
+                max_repos=cap_repos,
+                max_functions=cap_functions,
+                max_classes=cap_classes,
                 granularity=granularity,
                 engineered_only=engineered_only,
                 annotate_llm_score=annotate_llm_score,
-                export_ast=export_full_ast if export_ast else False,
+                export_ast=export_ast,
                 deduplicate=deduplicate_flag,
                 dedup_threshold=dedup_threshold,
                 output_dir=tmp_dir,
@@ -746,12 +754,13 @@ with st.expander("📋 Current Configuration (JSON)"):
             "end_date":             str(end_date),
             "min_stars":        int(min_stars),
             "min_contributors": int(min_contributors),
-            "max_repos":        int(max_repos)      if max_repos      > 0 else None,
-            "max_functions":    int(max_functions) if max_functions > 0 else None,
-            "max_classes":      int(max_classes)   if max_classes   > 0 else None,
-            "granularity":      [g for g, v in [("function", max_functions), ("class", max_classes)] if int(v) != -1],
+            "max_repos":        cap_repos,
+            "max_functions":    cap_functions,
+            "max_classes":      cap_classes,
+            "granularity":      granularity,
             "engineered_only":  engineered_only,
             "annotate_llm_score": annotate_llm_score,
+            "export_ast":       export_ast,
             "deduplicate":      deduplicate_flag,
             "dedup_threshold":  dedup_threshold,
             "export_format":    export_format,
