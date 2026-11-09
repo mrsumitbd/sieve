@@ -372,6 +372,11 @@ def run_pipeline(
         )
     if discovery_report.incomplete_results:
         problems.append("GitHub flagged some search results as incomplete")
+    if discovery_report.excluded:
+        problems.append(
+            f"{len(discovery_report.excluded)} repositor{'y' if len(discovery_report.excluded) == 1 else 'ies'} "
+            "skipped because their contributors could not be fetched"
+        )
     if problems:
         _progress(f"Warning: discovery is incomplete: {'; '.join(problems)}. See \"discovery\" in manifest.json.")
 

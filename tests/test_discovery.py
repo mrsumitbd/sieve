@@ -53,19 +53,24 @@ class TestBuildQuery:
 class TestGetContributorCount:
     def test_returns_count_on_success(self):
         mock_repo = MagicMock()
-        mock_repo.get_contributors.return_value.totalCount = 42
+        mock_repo.get_contributors.return_value = [
+            MagicMock(login=f"user{i}", type="User") for i in range(42)
+        ]
         assert _get_contributor_count(mock_repo, "token") == 42
 
-    def test_returns_zero_on_github_exception(self):
+    def test_other_github_errors_are_no_longer_turned_into_zero(self):
+        # They used to return 0 and drop the repo silently; see test_contributor_counting.py.
         from github import GithubException
+        from sieve.core.discovery import ContributorCountError
         mock_repo = MagicMock()
         mock_repo.full_name = "owner/repo"
         mock_repo.get_contributors.side_effect = GithubException(403, "Forbidden")
-        assert _get_contributor_count(mock_repo, "token") == 0
+        with pytest.raises(ContributorCountError):
+            _get_contributor_count(mock_repo, "token")
 
     def test_calls_get_contributors_with_anon_false(self):
         mock_repo = MagicMock()
-        mock_repo.get_contributors.return_value.totalCount = 10
+        mock_repo.get_contributors.return_value = [MagicMock(login="a", type="User")]
         _get_contributor_count(mock_repo, None)
         mock_repo.get_contributors.assert_called_once_with(anon=False)
 

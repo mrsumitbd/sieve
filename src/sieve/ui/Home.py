@@ -431,6 +431,9 @@ if st.session_state.summary:
                 "Functions/Methods", "Classes",
                 "Has Tests", "Test Confidence", "License",
             ]
+            # Repos whose contributor list GitHub would not return have no count;
+            # a nullable integer column keeps the known counts whole (5, not 5.0).
+            display_df["Contributors"] = display_df["Contributors"].astype("Int64")
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
         # ── Dependency Graph ──────────────────────────────────────────────────
