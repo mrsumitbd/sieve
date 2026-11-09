@@ -25,8 +25,10 @@ from pydantic import SecretStr
 from sieve.config import reveal_secret
 from sieve.core.github_limits import (
     GitHubQuotaError,
+    RateLimitWaiter,
     build_exhausted_message,
     fail_fast_retry,
+    pace_requests,
     reset_time_from_exception,
 )
 
@@ -80,6 +82,12 @@ class DiscoveryReport:
                         list their contributors because the list is too large.
                         They are recorded with contributors=None and pass any
                         min_contributors threshold.
+    rate_limit_waits:   {"count", "seconds"}: how many times the run waited out a
+                        GitHub rate limit (wait_for_rate_limit) and the total
+                        seconds slept. Zero unless waiting is enabled. When the
+                        pipeline shares one waiter across the run, this covers
+                        every phase (quota check, discovery, quality metrics),
+                        not discovery alone.
     """
     complete: bool = True
     total_matching: int = 0
@@ -88,6 +96,7 @@ class DiscoveryReport:
     incomplete_results: bool = False
     excluded: list = field(default_factory=list)
     contributors_unknown: list = field(default_factory=list)
+    rate_limit_waits: dict = field(default_factory=lambda: {"count": 0, "seconds": 0})
 
 
 # Map language names to GitHub search query values. Names not listed here are
@@ -183,7 +192,9 @@ def _describe_error(exc: Exception, token: Union[str, SecretStr, None]) -> str:
 
 
 def count_contributors(
-    repo: Repository, token: Union[str, SecretStr, None] = None
+    repo: Repository,
+    token: Union[str, SecretStr, None] = None,
+    limiter: Optional[RateLimitWaiter] = None,
 ) -> Optional[int]:
     """
     Number of human contributors (bots excluded), counted exactly.
@@ -198,16 +209,21 @@ def count_contributors(
     Returns None when GitHub refuses to list the contributors because the
     list is too large: the repository clearly has many.
 
+    limiter, when it is enabled, waits out rate limits (also one that hits
+    between two pages) and carries on counting where it stopped.
+
     Raises:
         RateLimitExceededException, BadCredentialsException: as GitHub reports them.
         GitHubQuotaError: a rate limit reported as a bare 429 or a secondary 403.
         ContributorCountError: any other error, after retrying transient ones
             (5xx, connection errors) CONTRIBUTOR_RETRIES times.
     """
+    limiter = limiter or RateLimitWaiter()
     attempt = 0
     while True:
         try:
-            return sum(1 for user in repo.get_contributors(anon=False) if not _is_bot(user))
+            users = limiter.iterate(lambda: repo.get_contributors(anon=False))
+            return sum(1 for user in users if not _is_bot(user))
         except (RateLimitExceededException, BadCredentialsException):
             raise
         except GithubException as e:
@@ -264,10 +280,15 @@ def _search_total(g: Github, query: str) -> tuple[int, bool]:
     return int(data["total_count"]), bool(data.get("incomplete_results", False))
 
 
-def count_results(query: str, github_token: Union[str, SecretStr, None] = None) -> int:
+def count_results(
+    query: str,
+    github_token: Union[str, SecretStr, None] = None,
+    limiter: Optional[RateLimitWaiter] = None,
+) -> int:
     """Number of repositories GitHub reports for a search query (not capped at 1000)."""
+    limiter = limiter or RateLimitWaiter()
     try:
-        return _search_total(make_client(github_token), query)[0]
+        return limiter.call(_search_total, make_client(github_token), query)[0]
     except GithubException as e:
         _raise_if_rate_limited(e, bool(reveal_secret(github_token)))
         raise
@@ -313,10 +334,18 @@ def _split_windows(
     yield from _split_windows(count, mid + timedelta(days=1), end, report)
 
 
-def _search(g: Github, query: str, authenticated: bool) -> Iterator[Repository]:
-    """Iterate a search sorted by stars, turning a rate limit on any page into GitHubQuotaError."""
+def _search(
+    g: Github, query: str, authenticated: bool, limiter: RateLimitWaiter
+) -> Iterator[Repository]:
+    """
+    Iterate a search sorted by stars. A rate limit on any page is waited out
+    when the limiter is enabled; otherwise (or if it will not clear) it becomes
+    GitHubQuotaError.
+    """
     try:
-        yield from g.search_repositories(query=query, sort="stars", order="desc")
+        yield from limiter.iterate(
+            lambda: g.search_repositories(query=query, sort="stars", order="desc")
+        )
     except GithubException as e:
         _raise_if_rate_limited(e, authenticated)
         raise
@@ -328,6 +357,7 @@ def _to_metadata(
     min_contributors: int,
     github_token: Union[str, SecretStr, None],
     report: Optional[DiscoveryReport] = None,
+    limiter: Optional[RateLimitWaiter] = None,
 ) -> Optional[RepoMetadata]:
     """
     Fetch the per-repo details; None if the repo is skipped.
@@ -337,9 +367,11 @@ def _to_metadata(
     whose contributor list is too large to fetch is kept with contributors=None
     (recorded in report.contributors_unknown).
     """
-    # Contributor count check — this costs at least one API call per repo
+    limiter = limiter or RateLimitWaiter()
+
+    # Contributor count check — ceil(contributors / 100) API calls per repo
     try:
-        contributor_count = count_contributors(repo, github_token)
+        contributor_count = count_contributors(repo, github_token, limiter)
     except ContributorCountError as e:
         if report is not None:
             report.excluded.append({"repo": repo.full_name, "reason": e.reason})
@@ -355,7 +387,7 @@ def _to_metadata(
 
     # Get last commit date
     try:
-        last_commit = repo.get_commits()[0].commit.committer.date
+        last_commit = limiter.call(lambda: repo.get_commits()[0].commit.committer.date)
         last_commit_str = last_commit.isoformat()
     except (RateLimitExceededException, BadCredentialsException):
         raise
@@ -392,6 +424,7 @@ def discover_repos(
     max_repos: Optional[int] = None,
     github_token: Union[str, SecretStr, None] = None,
     report: Optional[DiscoveryReport] = None,
+    limiter: Optional[RateLimitWaiter] = None,
 ) -> Iterator[RepoMetadata]:
     """
     Generator that yields RepoMetadata for repos matching all filters.
@@ -430,6 +463,13 @@ def discover_repos(
         github_token:     GitHub PAT. Without a token, GitHub allows 60 REST requests per hour and 10 search requests per minute.
         report:           Optional DiscoveryReport that is filled in as discovery
                           runs; read it after the generator is consumed or raises.
+        limiter:          Optional RateLimitWaiter. When enabled, every GitHub call
+                          (search, result counts, contributor pages, latest commit)
+                          waits out a rate limit and is retried, and the waits are
+                          recorded in report.rate_limit_waits. Default: a disabled
+                          one, i.e. a rate limit ends discovery as described below.
+                          Between repositories discovery pauses briefly, but only
+                          once the remaining quota is low (see pace_requests).
 
     Yields:
         RepoMetadata for each qualifying repo
@@ -452,6 +492,8 @@ def discover_repos(
         report = DiscoveryReport()
     if max_repos == 0:
         return
+    if limiter is None:
+        limiter = RateLimitWaiter()
 
     g = make_client(github_token)
     authenticated = bool(reveal_secret(github_token))
@@ -460,40 +502,41 @@ def discover_repos(
         if max_repos is not None and max_repos <= GITHUB_SEARCH_RESULT_LIMIT:
             yield from _discover_single_query(
                 g, authenticated, language, start_date, end_date, min_stars,
-                min_contributors, max_repos, github_token, report,
+                min_contributors, max_repos, github_token, report, limiter,
             )
         else:
             yield from _discover_windows(
                 g, authenticated, language, start_date, end_date, min_stars,
-                min_contributors, max_repos, github_token, report,
+                min_contributors, max_repos, github_token, report, limiter,
             )
     except Exception:
         report.complete = False
         raise
+    finally:
+        report.rate_limit_waits = limiter.stats()
 
 
 def _discover_single_query(
     g, authenticated, language, start_date, end_date, min_stars,
-    min_contributors, max_repos, github_token, report,
+    min_contributors, max_repos, github_token, report, limiter,
 ) -> Iterator[RepoMetadata]:
     query = build_query(language, start_date, end_date, min_stars)
     logger.info(f"GitHub search query: {query}")
     report.slices += 1
 
     yielded = scanned = 0
-    for repo in _search(g, query, authenticated):
+    for repo in _search(g, query, authenticated, limiter):
         scanned += 1
-        metadata = _to_metadata(repo, language, min_contributors, github_token, report)
-        if metadata is None:
-            continue
-        yield metadata
-        yielded += 1
-        if yielded >= max_repos:
-            logger.info(f"Reached max_repos cap of {max_repos}. Stopping discovery.")
-            report.total_matching = scanned
-            return
-        # Respect rate limits — sleep briefly between contributor fetches
-        time.sleep(0.5)
+        metadata = _to_metadata(repo, language, min_contributors, github_token, report, limiter)
+        if metadata is not None:
+            yield metadata
+            yielded += 1
+            if yielded >= max_repos:
+                logger.info(f"Reached max_repos cap of {max_repos}. Stopping discovery.")
+                report.total_matching = scanned
+                return
+        # Slow down only when the quota is running low (a no-op otherwise)
+        pace_requests(g)
 
     report.total_matching = scanned
     if scanned >= GITHUB_SEARCH_RESULT_LIMIT:
@@ -507,7 +550,7 @@ def _discover_single_query(
 
 def _discover_windows(
     g, authenticated, language, start_date, end_date, min_stars,
-    min_contributors, max_repos, github_token, report,
+    min_contributors, max_repos, github_token, report, limiter,
 ) -> Iterator[RepoMetadata]:
     counts: dict[tuple[date, date], int] = {}
 
@@ -515,7 +558,7 @@ def _discover_windows(
         if (lo, hi) not in counts:
             query = build_query(language, lo, hi, min_stars)
             try:
-                total, incomplete = _search_total(g, query)
+                total, incomplete = limiter.call(_search_total, g, query)
             except GithubException as e:
                 _raise_if_rate_limited(e, authenticated)
                 raise
@@ -544,7 +587,7 @@ def _discover_windows(
             query = build_query(language, lo, hi, min_stars)
             logger.info(f"GitHub search query ({window_total} results): {query}")
             report.slices += 1
-            yield from _search(g, query, authenticated)
+            yield from _search(g, query, authenticated, limiter)
 
     if max_repos is None:
         repos: Iterator[Repository] = window_repos()
@@ -555,13 +598,12 @@ def _discover_windows(
 
     yielded = 0
     for repo in repos:
-        metadata = _to_metadata(repo, language, min_contributors, github_token, report)
-        if metadata is None:
-            continue
-        yield metadata
-        yielded += 1
-        if max_repos is not None and yielded >= max_repos:
-            logger.info(f"Reached max_repos cap of {max_repos}. Stopping discovery.")
-            return
-        # Respect rate limits — sleep briefly between contributor fetches
-        time.sleep(0.5)
+        metadata = _to_metadata(repo, language, min_contributors, github_token, report, limiter)
+        if metadata is not None:
+            yield metadata
+            yielded += 1
+            if max_repos is not None and yielded >= max_repos:
+                logger.info(f"Reached max_repos cap of {max_repos}. Stopping discovery.")
+                return
+        # Slow down only when the quota is running low (a no-op otherwise)
+        pace_requests(g)

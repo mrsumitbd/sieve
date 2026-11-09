@@ -96,6 +96,14 @@ class SIEVEConfig(BaseModel):
     # masked in repr/str. Accept plain strings as input.
     github_token: Optional[SecretStr] = Field(default=None, exclude=True, description="GitHub PAT for higher rate limits. The CLI falls back to the GITHUB_TOKEN env var when unset")
     hf_token: Optional[SecretStr] = Field(default=None, exclude=True, description="HuggingFace token for downloading model weights. The CLI falls back to the HF_TOKEN env var when unset")
+    wait_for_rate_limit: bool = Field(
+        default=False,
+        description=(
+            "When GitHub's rate limit is reached, sleep until it resets (or for the Retry-After a "
+            "secondary limit asks for) and carry on, instead of stopping with partial results or an error. "
+            "A wait can last up to an hour per primary limit. Default: False. Not offered in the web UI"
+        ),
+    )
 
     @field_validator("granularity")
     @classmethod

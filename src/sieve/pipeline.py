@@ -31,10 +31,12 @@ from pydantic import SecretStr
 from sieve.config import SIEVEConfig
 from sieve.core.discovery import discover_repos, make_client, DiscoveryReport, RepoMetadata
 from sieve.core.github_limits import (
+    MAX_WAITS_PER_CALL,
     MIN_CALLS_REQUIRED,
     GitHubAuthError,
     GitHubQuotaError,
     QuotaInfo,
+    RateLimitWaiter,
     build_exhausted_message,
     format_quota_line,
     format_reset,
@@ -321,7 +323,21 @@ def run_pipeline(
     rate_limited = False
     rate_limit_reset = None
 
+    # One waiter for the whole run, so every wait is counted in the same place.
+    # Disabled unless the config asks for waiting; then it behaves as a no-op.
+    limiter = RateLimitWaiter(enabled=config.wait_for_rate_limit, progress=_progress)
+
     quota = _fetch_quota(config.github_token)
+    # With waiting on, an exhausted quota is waited out (and re-read) instead of ending the run.
+    waits = 0
+    while (
+        limiter.enabled and quota is not None
+        and quota.core_remaining < MIN_CALLS_REQUIRED and waits < MAX_WAITS_PER_CALL
+    ):
+        _progress(format_quota_line(quota))
+        limiter.wait_for_reset(quota.core_reset)
+        waits += 1
+        quota = _fetch_quota(config.github_token)
     if quota is not None:
         _progress(format_quota_line(quota))
         if quota.core_remaining < MIN_CALLS_REQUIRED:
@@ -340,6 +356,7 @@ def run_pipeline(
             max_repos=config.max_repos,
             github_token=config.github_token,
             report=discovery_report,
+            limiter=limiter,
         ):
             all_discovered.append(repo_meta)
             now = _time.time()
@@ -402,6 +419,7 @@ def run_pipeline(
                     contributor_count=repo_meta.contributors,
                     repo_path=None,   # No clone yet, so LOC will be 0 at this stage
                     github_token=config.github_token,
+                    limiter=limiter,
                 )
             except BadCredentialsException as e:
                 raise GitHubAuthError() from e
@@ -713,6 +731,9 @@ def run_pipeline(
         f"Extraction complete — {len(all_functions)} functions, "
         f"{len(all_classes)} classes. Exporting..."
     )
+
+    # The waiter saw every phase (quota check, discovery, quality metrics); record the whole run.
+    discovery_report.rate_limit_waits = limiter.stats()
 
     output_paths = export_dataset(
         functions=all_functions,

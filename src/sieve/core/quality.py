@@ -41,7 +41,7 @@ from github.GithubException import BadCredentialsException, RateLimitExceededExc
 from pydantic import SecretStr
 
 from sieve.config import reveal_secret
-from sieve.core.github_limits import fail_fast_retry
+from sieve.core.github_limits import RateLimitWaiter, fail_fast_retry
 
 logger = logging.getLogger(__name__)
 
@@ -307,6 +307,7 @@ def collect_metrics(
     contributor_count: Optional[int],
     repo_path: Optional[str],
     github_token: Union[str, SecretStr, None] = None,
+    limiter: Optional[RateLimitWaiter] = None,
 ) -> RepoQualityMetrics:
     """
     Collect all quality metrics for a single repo.
@@ -318,6 +319,10 @@ def collect_metrics(
             would not list them: too many)
         repo_path: Path to cloned repo (for LOC counting). None = skip LOC.
         github_token: GitHub PAT for API calls
+        limiter: Optional RateLimitWaiter. When enabled, each GitHub request
+            below waits out a rate limit and is retried on its own (a limit on
+            the pull-request count does not repeat the release count).
+            Default: a disabled one, so a rate limit is raised as it came.
 
     Returns:
         RepoQualityMetrics with Stage 1 and Stage 2 pass/fail populated.
@@ -328,16 +333,18 @@ def collect_metrics(
         retry=fail_fast_retry(),
     )
 
+    limiter = limiter or RateLimitWaiter()
     release_count = 0
     pull_request_count = 0
     issue_count = 0
 
     try:
-        repo = g.get_repo(repo_full_name)
-        release_count = repo.get_releases().totalCount
+        # Each totalCount is a request of its own, so each gets its own retry scope.
+        repo = limiter.call(g.get_repo, repo_full_name)
+        release_count = limiter.call(lambda: repo.get_releases().totalCount)
         # Issues API returns both issues and PRs unless filtered
-        pull_request_count = repo.get_pulls(state="all").totalCount
-        issue_count = repo.get_issues(state="all").totalCount - pull_request_count
+        pull_request_count = limiter.call(lambda: repo.get_pulls(state="all").totalCount)
+        issue_count = limiter.call(lambda: repo.get_issues(state="all").totalCount) - pull_request_count
         issue_count = max(issue_count, 0)
     except (RateLimitExceededException, BadCredentialsException):
         raise

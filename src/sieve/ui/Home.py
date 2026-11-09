@@ -265,6 +265,8 @@ if run_button:
                 output_dir=tmp_dir,
                 export_format=export_format,
                 github_token=github_token or None,
+                # Never wait in the web UI: an hour-long sleep would hang the hosted Space.
+                wait_for_rate_limit=False,
             )
         except Exception as e:
             st.error(f"Configuration error: {e}")

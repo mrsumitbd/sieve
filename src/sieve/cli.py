@@ -105,6 +105,7 @@ def run(
     output_dir: str = typer.Option("./sieve_output", help="Output directory"),
     export_format: str = typer.Option("jsonl", help="Export format: jsonl, parquet, or both"),
     github_token: Optional[str] = typer.Option(None, help="GitHub PAT. Default: the GITHUB_TOKEN environment variable"),
+    wait_for_rate_limit: bool = typer.Option(False, "--wait-for-rate-limit/--no-wait-for-rate-limit", help="When GitHub's rate limit is reached, sleep until it resets and carry on instead of stopping. A wait can last up to an hour; Ctrl-C stops the run (nothing is written until the run ends)"),
 ):
     """Run the SIEVE pipeline."""
     # Config file takes precedence over individual flags
@@ -152,6 +153,7 @@ def run(
                 output_dir=output_dir,
                 export_format=export_format,
                 github_token=github_token,
+                wait_for_rate_limit=wait_for_rate_limit,
             )
         except ValidationError as e:
             typer.echo(f"Error: invalid config: {_format_validation_error(e)}", err=True)

@@ -513,6 +513,7 @@ class TestPipelineManifest:
             "incomplete_results": False,
             "excluded": [],
             "contributors_unknown": [],
+            "rate_limit_waits": {"count": 0, "seconds": 0},
         }
         assert discovery["slices"] > 1
 
