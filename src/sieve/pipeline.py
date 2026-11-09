@@ -44,7 +44,10 @@ from sieve.core.github_limits import (
     reset_time_from_exception,
 )
 from sieve.core.detection import detect_test_suite
-from sieve.core.extraction import extract_from_repo, count_repo_contents, FunctionRecord, ClassRecord
+from sieve.core.extraction import (
+    EXTRACTION_SKIP_DIRS, extract_from_repo, count_repo_contents, count_skipped_files,
+    FunctionRecord, ClassRecord,
+)
 from sieve.core.deduplication import deduplicate
 from sieve.core.export import count_llm_scored, count_llm_truncated, export_dataset
 from sieve.core.quality import collect_metrics, apply_filters, RepoQualityMetrics
@@ -131,6 +134,11 @@ def _process_repo(
                 class_cap=class_cap,
             )
 
+            try:
+                files_skipped = count_skipped_files(clone_path, config.language)
+            except Exception:
+                files_skipped = 0
+
             # Populate commit_sha on all records for GitHub permalinks
             if commit_sha:
                 for r in funcs + classes:
@@ -157,6 +165,8 @@ def _process_repo(
                 "topics": repo_meta.topics,
                 "test_suite": test_report.to_dict(),
                 "dependencies": dependencies,
+                # Source files passed over because they sit in vendored/generated/virtualenv dirs
+                "extraction_files_skipped": files_skipped,
             }
 
             if quality_metrics:
@@ -748,6 +758,10 @@ def run_pipeline(
         config=config.model_dump(mode="json"),
         repo_metadata_list=repo_metadata_list,
         discovery=asdict(discovery_report),
+        extraction={
+            "skip_dirs": sorted(EXTRACTION_SKIP_DIRS),
+            "files_skipped": sum(m.get("extraction_files_skipped", 0) for m in repo_metadata_list),
+        },
     )
 
     _total_elapsed = _time.time() - _pipeline_start
