@@ -10,6 +10,7 @@ Small fake repo trees are built in tmp_path; nothing touches the network.
 
 import json
 import os
+from collections import Counter
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -243,7 +244,7 @@ class TestPruning:
         assert ex.count_repo_contents(str(root), "Python", ["function", "class"]) == (1, 1)
 
 
-# ─── 5. Ordering is unchanged for repos without skipped directories ───────────
+# ─── 5. Same records as before; a pinned order of its own ─────────────────────
 
 def _legacy_extract(root: Path, language="Python"):
     """The pre-change algorithm: rglob plus after-the-fact filtering of the ABSOLUTE parts."""
@@ -264,78 +265,67 @@ def _legacy_extract(root: Path, language="Python"):
     return funcs, classes
 
 
-class _SortedScandir:
-    """os.scandir with a deterministic (name-sorted) order, so legacy output is comparable."""
-
-    def __init__(self):
-        self._real = os.scandir
-
-    def __call__(self, path="."):
-        with self._real(path) as it:
-            entries = sorted(it, key=lambda e: e.name)
-
-        class _SortedIterator:
-            def __init__(s):
-                s._it = iter(entries)
-
-            def __iter__(s):
-                return s
-
-            def __next__(s):
-                return next(s._it)
-
-            def __enter__(s):
-                return s
-
-            def __exit__(s, *a):
-                return False
-
-            def close(s):
-                pass
-
-        return _SortedIterator()
-
-
 def _key(r):
     return (r.file_path, r.func_name if hasattr(r, "func_name") else r.class_name, r.start_line)
 
 
-class TestOrderingUnchanged:
+def _multiset(records):
+    """Order-free view of whole records: sorted by a unique key (the key is checked for uniqueness)."""
+    ordered = sorted(records, key=_key)
+    keys = [_key(r) for r in ordered]
+    assert len(keys) == len(set(keys)), "fixture must give every record a unique key"
+    return ordered
+
+
+class TestSameRecordsAsLegacy:
     def make_repo(self, root: Path):
         for rel in ["zz.py", "a.py", "b.py", "pkg/x.py", "pkg/sub/y.py", "pkg/sub/deeper/w.py",
                     "pkg2/z.py", "pkg2/Z2.py", "src/env/e.py", "external/ext.py", "Alpha/up.py"]:
             write(root, rel)
         return root
 
-    def test_new_order_equals_legacy_order_with_a_stable_directory_listing(self, tmp_path, monkeypatch):
+    def test_new_walker_extracts_the_same_records_as_the_rglob_based_extraction(self, tmp_path):
+        """
+        Record equality only, order ignored. The legacy rglob order followed the filesystem and
+        pathlib's own traversal, and that traversal differs between Python versions (3.12 visits
+        directories in a different order than 3.11), so asserting the legacy ORDER would make this
+        test depend on the interpreter. The order of the new walker is pinned separately, in
+        TestNewOrderIsPinned, with an explicit expected list.
+        """
         root = self.make_repo(tmp_path)
-        monkeypatch.setattr(os, "scandir", _SortedScandir())
         old_funcs, old_classes = _legacy_extract(root)
         new_funcs, new_classes = extract(root)
-        assert [_key(r) for r in new_funcs] == [_key(r) for r in old_funcs]
-        assert [_key(r) for r in new_classes] == [_key(r) for r in old_classes]
-        assert len(new_funcs) == 11
+        assert len(new_funcs) == len(old_funcs) == 11
+        assert len(new_classes) == len(old_classes) == 11
+        # Whole records (every field), compared as multisets.
+        assert _multiset(new_funcs) == _multiset(old_funcs)
+        assert _multiset(new_classes) == _multiset(old_classes)
+        assert Counter(map(_key, new_funcs)) == Counter(map(_key, old_funcs))
+        assert Counter(map(_key, new_classes)) == Counter(map(_key, old_classes))
 
-    def test_same_records_as_legacy_on_the_real_directory_order(self, tmp_path):
-        root = self.make_repo(tmp_path)
-        old_funcs, old_classes = _legacy_extract(root)
-        new_funcs, new_classes = extract(root)
-        assert sorted(map(_key, new_funcs)) == sorted(map(_key, old_funcs))
-        assert sorted(map(_key, new_classes)) == sorted(map(_key, old_classes))
-        # Whole records, not just the keys.
-        by_key = {_key(r): r for r in old_funcs}
-        assert all(by_key[_key(r)] == r for r in new_funcs)
+
+class TestNewOrderIsPinned:
+    """
+    The order of the new walker, as an explicit list: the files of a directory sorted by name,
+    then its subdirectories sorted by name, depth first. Names sort by code point, so upper case
+    comes before lower case. Not derived from the filesystem, so it holds on every Python version.
+    """
+
+    make_repo = TestSameRecordsAsLegacy.make_repo
+
+    EXPECTED = [
+        "a.py", "b.py", "zz.py",
+        "Alpha/up.py",
+        "external/ext.py",
+        "pkg/x.py", "pkg/sub/y.py", "pkg/sub/deeper/w.py",
+        "pkg2/Z2.py", "pkg2/z.py",
+        "src/env/e.py",
+    ]
 
     def test_order_is_files_of_a_directory_then_its_subdirectories_all_sorted(self, tmp_path):
         root = self.make_repo(tmp_path)
-        assert func_paths(root) == [
-            "a.py", "b.py", "zz.py",
-            "Alpha/up.py",
-            "external/ext.py",
-            "pkg/x.py", "pkg/sub/y.py", "pkg/sub/deeper/w.py",
-            "pkg2/Z2.py", "pkg2/z.py",
-            "src/env/e.py",
-        ]
+        assert func_paths(root) == self.EXPECTED
+        assert class_paths(root) == self.EXPECTED
 
     def test_order_does_not_depend_on_creation_order(self, tmp_path):
         a, b = tmp_path / "a", tmp_path / "b"
@@ -344,12 +334,49 @@ class TestOrderingUnchanged:
             write(a, rel)
         for rel in reversed(names):
             write(b, rel)
-        assert func_paths(a) == func_paths(b)
+        expected = ["a.py", "m.py", "c/z.py", "d/b.py", "d/x.py"]
+        assert func_paths(a) == expected
+        assert func_paths(b) == expected
+
+    def test_order_does_not_depend_on_the_directory_listing_order(self, tmp_path, monkeypatch):
+        """Even a listing in reverse name order (the worst case for an unsorted walk) gives the pinned order."""
+        root = self.make_repo(tmp_path)
+        real_scandir = os.scandir
+
+        def reversed_scandir(path="."):
+            with real_scandir(path) as it:
+                entries = sorted(it, key=lambda e: e.name, reverse=True)
+            return _ListingIterator(entries)
+
+        monkeypatch.setattr(os, "scandir", reversed_scandir)
+        assert func_paths(root) == self.EXPECTED
 
     def test_caps_keep_the_first_records_in_that_order(self, tmp_path):
         root = self.make_repo(tmp_path)
         funcs, _ = extract(root, func_cap=2, class_cap=2)
         assert [f.file_path for f in funcs] == ["a.py", "b.py"]
+
+
+class _ListingIterator:
+    """What os.scandir returns, over a fixed list of entries (iterator and context manager)."""
+
+    def __init__(self, entries):
+        self._it = iter(entries)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._it)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def close(self):
+        pass
 
 
 # ─── 6. files_skipped and the manifest ────────────────────────────────────────
