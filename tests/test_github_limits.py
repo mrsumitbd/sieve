@@ -192,7 +192,7 @@ def _mock_repo(name):
     repo.stargazers_count = 100
     repo.default_branch = "main"
     repo.license = None
-    repo.get_topics.return_value = []
+    repo.topics = []
     repo.pushed_at = None
     repo.get_commits.return_value = [MagicMock()]
     return repo
@@ -202,6 +202,13 @@ def _results(repos):
     results = MagicMock()
     results.__iter__.return_value = iter(repos)
     return results
+
+
+def _set_total(mock_gh, total):
+    """Answer the raw total_count request that discovery makes when no cap <= 1000 applies."""
+    mock_gh.return_value.requester.requestJsonAndCheck.return_value = (
+        {}, {"total_count": total, "incomplete_results": False}
+    )
 
 
 def _meta(name):
@@ -247,6 +254,7 @@ class TestDiscoveryRateLimit:
         with patch("sieve.core.discovery.Github") as mock_gh, \
              patch("sieve.core.discovery.time.sleep"):
             mock_gh.return_value.search_repositories.return_value = _results(repos)
+            _set_total(mock_gh, 2)
             got = []
             with pytest.raises(RateLimitExceededException):
                 for meta in discover_repos("Python", date(2024, 1, 1), date(2024, 12, 31)):
@@ -261,6 +269,7 @@ class TestDiscoveryRateLimit:
 
         with patch("sieve.core.discovery.Github") as mock_gh:
             mock_gh.return_value.search_repositories.return_value = _results([repo])
+            _set_total(mock_gh, 1)
             with pytest.raises(RateLimitExceededException):
                 list(discover_repos("Python", date(2024, 1, 1), date(2024, 12, 31)))
 
@@ -409,6 +418,7 @@ class TestRejectedToken:
 
         with patch("sieve.core.discovery.Github") as mock_gh:
             mock_gh.return_value.search_repositories.return_value = _results([repo])
+            _set_total(mock_gh, 1)
             with pytest.raises(BadCredentialsException):
                 list(discover_repos("Python", date(2024, 1, 1), date(2024, 12, 31)))
 
