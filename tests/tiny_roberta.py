@@ -39,7 +39,14 @@ def make_tokenizer():
     vocab = {tok: i for i, tok in enumerate(_SPECIALS + WORDS)}
     tok = Tokenizer(models.WordLevel(vocab, unk_token="<unk>"))
     tok.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
-    tok.post_processor = processors.RobertaProcessing(sep=("</s>", 2), cls=("<s>", 0))
+    # Same ids as RobertaProcessing ("<s> A </s>", pairs "<s> A </s> </s> B </s>"), but
+    # via TemplateProcessing: RobertaProcessing renamed its `cls` keyword to `cls_token`
+    # in tokenizers 0.23, which broke keyword calls. This interface is stable.
+    tok.post_processor = processors.TemplateProcessing(
+        single="<s> $A </s>",
+        pair="<s> $A </s> </s> $B </s>",
+        special_tokens=[("<s>", 0), ("</s>", 2)],
+    )
     return PreTrainedTokenizerFast(
         tokenizer_object=tok,
         bos_token="<s>", eos_token="</s>", sep_token="</s>", cls_token="<s>",
