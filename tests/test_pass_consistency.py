@@ -13,9 +13,14 @@ These tests build small fake repos in tmp_path (no network) and check:
      returns, for functions and classes separately, for every language, with
      and without caps,
   3. the allocation that _stratified_caps produces from the Pass 1 counts,
-  4. the differences that are NOT about file selection (node-level counting),
-     recorded as strict xfails so they stay visible and fail loudly the day
-     someone fixes them.
+  4. the cases that used to differ at the NODE level (tests/walk_cases.py: JS
+     function keyword tokens and nested or anonymous functions, parse-error
+     subtrees, Java anonymous-class methods and classes in method bodies, C++
+     forward declarations, the Python depth guard). Pass 1 now counts exactly
+     the nodes the Pass 2 extractors turn into records, so these are ordinary
+     assertions,
+  5. the allocation _stratified_caps produces from Pass 1 for a JavaScript repo
+     set with callbacks, nested arrows and function declarations.
 """
 
 import re
@@ -29,6 +34,8 @@ from sieve.config import SIEVEConfig
 from sieve.core import extraction as ex
 from sieve.core.discovery import RepoMetadata
 from sieve.pipeline import _stratified_caps, run_pipeline
+
+import walk_cases
 
 BOTH = ["function", "class"]
 
@@ -46,8 +53,7 @@ def _ident(stem: str) -> str:
 def source_for(language: str, rel: str) -> str:
     """A small valid file with FUNCS_PER_FILE functions and CLASSES_PER_FILE class.
 
-    Only constructs on which the two passes agree at the node level are used
-    here (see TestKnownNodeLevelDivergences for the ones they do not).
+    Plain constructs only; the awkward ones live in tests/walk_cases.py.
     """
     s = _ident(Path(rel).name.split(".")[0])
     if language == "Python":
@@ -272,15 +278,13 @@ class TestPass1MatchesPass2:
 class TestRobustness:
     """Awkward files must not make the two passes disagree."""
 
-    # A file with a syntax error. JavaScript is absent on purpose: its error
-    # recovery makes the two passes disagree, which is recorded as a strict
-    # xfail in NODE_LEVEL ("js-syntax-error-...") rather than hidden here.
+    # A file with a syntax error.
     BROKEN = {
         "Python": "def f(:\n  pass\nclass A:\n    def m(self): pass\ndef ok(): pass\n",
         "Java": "public class A { public void m( { } \n public int ok() { return 1; }\n}\n",
         "C++": "class A { int m( { }; \nint ok() { return 1; }\n",
+        "JavaScript": walk_cases.JS_BROKEN,
     }
-    JS_BROKEN = "class A { m( { }\nconst ok = () => 1;\n"
     EXT = {"Python": "py", "Java": "java", "JavaScript": "js", "C++": "cpp"}
 
     @pytest.mark.parametrize("language", LANGUAGES)
@@ -404,62 +408,178 @@ class TestStratifiedAllocationMatchesReality:
         assert by_cap[6][1] == {"o/A": 3, "o/B": 3}
 
 
-# ─── 4. Differences that are NOT about file selection ─────────────────────────
+# ─── 4. Node-level cases: Pass 1 == Pass 2 ───────────────────────────────────
 #
-# Pass 1 counts raw tree-sitter node types; Pass 2 runs the per-language
-# extractors, which walk the tree differently. The cases below make the two
-# disagree on a file that BOTH passes treat as eligible. They are strict xfails:
-# they document the gap today and fail loudly (XPASS) the day it is closed, at
-# which point the marker should be removed and the case moved into FIXTURES.
+# Every case below used to make the two passes disagree on a file that BOTH
+# treated as eligible (Pass 1 counted raw tree-sitter node types; the extractors
+# walk the tree their own way). Both now consume one parse-only walk per
+# language (extraction._find_definitions), so they agree by construction; these
+# tests keep it that way. The expected pair is what Pass 2 returned before the
+# refactor, so agreement cannot come from both being wrong together.
 
-def _deep_python(depth: int) -> str:
-    lines = [("  " * i) + f"def f{i}():" for i in range(depth)]
-    lines.append("  " * depth + "pass")
-    return "\n".join(lines) + "\n"
-
-
-NODE_LEVEL = [
-    pytest.param(
-        "Java", "A.java",
-        "class A { void m() { Object o = new Object() { public void x() {} }; } }\n",
-        id="java-method-of-anonymous-class",
-    ),
-    pytest.param(
-        "Java", "A.java",
-        "class A { void m() { class L { void l() {} } } }\n",
-        id="java-class-declared-inside-a-method",
-    ),
-    pytest.param(
-        "JavaScript", "a.js", "function f() { return 1; }\n",
-        id="js-plain-function-declaration-counted-twice",
-    ),
-    pytest.param("JavaScript", "a.js", "async function f() { return 1; }\n", id="js-async-function-declaration"),
-    pytest.param("JavaScript", "a.js", "export function f() { return 1; }\n", id="js-exported-function-declaration"),
-    pytest.param("JavaScript", "a.js", "function* g() {}\n", id="js-generator-function"),
-    pytest.param("JavaScript", "a.js", "const h = function () {};\n", id="js-function-expression"),
-    pytest.param("JavaScript", "a.js", "[1].map(x => x);\n", id="js-callback-arrow"),
-    pytest.param("JavaScript", "a.js", "function f() { const g = () => 1; }\n", id="js-arrow-inside-function-body"),
-    pytest.param("JavaScript", "a.js", "const o = { m() {} };\n", id="js-object-literal-method"),
-    pytest.param("JavaScript", "a.js", "const C = class { m() {} };\n", id="js-class-expression"),
-    pytest.param(
-        "JavaScript", "a.js", TestRobustness.JS_BROKEN,
-        id="js-syntax-error-arrow-counted-inside-an-ERROR-subtree",
-    ),
-    pytest.param("C++", "a.cpp", "class Fwd;\n", id="cpp-forward-declaration"),
-    pytest.param("C++", "a.cpp", "class Fwd;\nvoid f(class Fwd* p) {}\n", id="cpp-elaborated-type-specifier"),
-    pytest.param("C++", "a.cpp", "void f() { class L { void l() {} }; }\n", id="cpp-class-declared-inside-a-function"),
-    pytest.param("Python", "a.py", _deep_python(250), id="python-nesting-deeper-than-the-extractor-depth-guard"),
-]
-
-
-class TestKnownNodeLevelDivergences:
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Pass 1 counts raw node types (and, for JS, the 'function' keyword token); "
-               "Pass 2's extractors walk the tree differently. Not a file-selection difference.",
-    )
-    @pytest.mark.parametrize("language,name,source", NODE_LEVEL)
-    def test_count_equals_extraction(self, tmp_path, language, name, source):
+class TestNodeLevelCasesAgree:
+    @pytest.mark.parametrize("language,name,source,expected", walk_cases.CASE_PARAMS)
+    def test_pass_2_returns_the_pinned_records(self, tmp_path, language, name, source, expected):
         write(tmp_path, name, source)
         funcs, classes = extract(tmp_path, language)
-        assert count(tmp_path, language) == (len(funcs), len(classes))
+        assert (len(funcs), len(classes)) == expected
+
+    @pytest.mark.parametrize("language,name,source,expected", walk_cases.CASE_PARAMS)
+    def test_pass_1_equals_pass_2(self, tmp_path, language, name, source, expected):
+        write(tmp_path, name, source)
+        funcs, classes = extract(tmp_path, language)
+        assert count(tmp_path, language) == (len(funcs), len(classes)) == expected
+
+    @pytest.mark.parametrize("language,name,source,expected", walk_cases.CASE_PARAMS)
+    @pytest.mark.parametrize("granularities", [["function"], ["class"], ["function", "class"]])
+    def test_every_granularity_setting(self, tmp_path, language, name, source, expected, granularities):
+        write(tmp_path, name, source)
+        funcs, classes = extract(tmp_path, language, granularities)
+        counted = count(tmp_path, language, granularities)
+        assert counted == (len(funcs), len(classes))
+        assert counted == (expected[0] if "function" in granularities else 0,
+                           expected[1] if "class" in granularities else 0)
+
+    @pytest.mark.parametrize("language,name,source,expected", walk_cases.CASE_PARAMS)
+    @pytest.mark.parametrize("func_cap,class_cap", [(None, None), (0, 0), (1, 1), (2, None), (None, 1), (1000, 1000)])
+    def test_with_caps_pass_2_returns_min_of_cap_and_pass_1(self, tmp_path, language, name, source, expected,
+                                                            func_cap, class_cap):
+        write(tmp_path, name, source)
+        n_funcs, n_classes = count(tmp_path, language)
+        funcs, classes = extract(tmp_path, language, func_cap=func_cap, class_cap=class_cap)
+        assert len(funcs) == (n_funcs if func_cap is None else min(func_cap, n_funcs))
+        assert len(classes) == (n_classes if class_cap is None else min(class_cap, n_classes))
+
+    @pytest.mark.parametrize("language,name,source,expected", walk_cases.CASE_PARAMS)
+    def test_nothing_is_counted_that_pass_2_cannot_deliver(self, tmp_path, language, name, source, expected):
+        """Pass 1 is never an overestimate: a cap equal to the Pass 1 count is always filled."""
+        write(tmp_path, name, source)
+        n_funcs, n_classes = count(tmp_path, language)
+        funcs, classes = extract(tmp_path, language, func_cap=n_funcs, class_cap=n_classes)
+        assert (len(funcs), len(classes)) == (n_funcs, n_classes)
+
+
+# ─── 5. JavaScript: callbacks, nested arrows and function declarations ────────
+#
+# Before the walk was shared, Pass 1 counted the `function` keyword token as a
+# second function, and every callback and nested arrow, none of which Pass 2
+# extracts. A JS repo full of them looked 2-3x bigger than it was, so
+# _stratified_caps gave it a share Pass 2 could not fill.
+
+JS_CALLBACK_HEAVY = """\
+function load{n}(items) {{
+  return items.map(i => i.id).filter(id => id > 0).reduce((a, b) => a + b, 0);
+}}
+function save{n}(rows) {{
+  const norm = rows.map(r => r.trim());
+  return () => norm;
+}}
+const handler{n} = (req, res) => {{ res.on('data', chunk => chunk); }};
+"""
+# 3 functions per file that Pass 2 extracts (load, save, handler); the callbacks,
+# `norm` and the returned arrow are inside them and are not.
+
+JS_CLASS_ONLY = """\
+class Svc{n} {{
+  a() {{ return 1; }}
+  b() {{ return 2; }}
+  c() {{ return 3; }}
+}}
+"""
+# 3 methods and 1 class per file, counted identically by the old and new Pass 1.
+
+JS_TREES = {
+    "o/callbacks": {f"src/cb{i}.js": JS_CALLBACK_HEAVY.format(n=i) for i in range(2)},   # 6 real functions
+    "o/classes":   {f"src/cls{i}.js": JS_CLASS_ONLY.format(n=i) for i in range(2)},      # 6 real functions
+}
+
+
+def _build_js_repos(root: Path) -> dict[str, Path]:
+    repos = {}
+    for name, files in JS_TREES.items():
+        repo = root / name.split("/")[1]
+        for rel, text in files.items():
+            write(repo, rel, text)
+        repos[name] = repo
+    return repos
+
+
+class TestStratifiedAllocationJavaScript:
+    def test_pass_1_counts_what_pass_2_extracts(self, tmp_path):
+        repos = _build_js_repos(tmp_path)
+        counts = {n: count(p, "JavaScript") for n, p in repos.items()}
+        assert counts == {"o/callbacks": (6, 0), "o/classes": (6, 2)}
+        for name, path in repos.items():
+            funcs, classes = extract(path, "JavaScript")
+            assert counts[name] == (len(funcs), len(classes))
+
+    def test_equal_supply_gets_equal_caps_and_pass_2_fills_every_one(self, tmp_path):
+        repos = _build_js_repos(tmp_path)
+        counts = {n: count(p, "JavaScript") for n, p in repos.items()}
+        func_caps = _stratified_caps({n: c[0] for n, c in counts.items()}, 8)
+        class_caps = _stratified_caps({n: c[1] for n, c in counts.items()}, 2)
+        # The two repos really offer 6 functions each, so they split 8 evenly.
+        # (With the old inflated counts the callback repo looked about 3x larger
+        # and was allotted 6 of the 8, more than it has.)
+        assert func_caps == {"o/callbacks": 4, "o/classes": 4}
+        assert class_caps == {"o/callbacks": 0, "o/classes": 2}
+
+        got_funcs = got_classes = 0
+        for name, path in repos.items():
+            funcs, classes = extract(path, "JavaScript", func_cap=func_caps[name], class_cap=class_caps[name])
+            assert len(funcs) == func_caps[name], f"{name}: allocated more than Pass 2 can deliver"
+            assert len(classes) == class_caps[name], f"{name}: allocated more than Pass 2 can deliver"
+            got_funcs += len(funcs)
+            got_classes += len(classes)
+        assert (got_funcs, got_classes) == (8, 2)
+
+    def test_a_cap_above_the_supply_is_allocated_in_full_never_beyond_it(self, tmp_path):
+        repos = _build_js_repos(tmp_path)
+        counts = {n: count(p, "JavaScript")[0] for n, p in repos.items()}
+        caps = _stratified_caps(counts, 1000)
+        assert caps == {"o/callbacks": 6, "o/classes": 6}
+        for name, path in repos.items():
+            assert len(extract(path, "JavaScript", func_cap=caps[name])[0]) == caps[name]
+
+    def test_run_pipeline_computes_caps_from_the_extractable_counts(self, tmp_path):
+        """End to end: the counts handed to _stratified_caps are what Pass 2 can deliver."""
+        config = SIEVEConfig(language="JavaScript", start_date=date(2024, 1, 1), end_date=date(2024, 12, 31),
+                             output_dir=str(tmp_path / "out"), github_token="x",
+                             max_functions=8, max_classes=2)
+
+        def meta(name):
+            return RepoMetadata(
+                full_name=name, url=f"https://github.com/{name}", stars=100, contributors=5,
+                last_commit_date="2024-01-01T00:00:00", default_branch="main", license_spdx="MIT",
+                language="JavaScript", collected_at="2024-06-01T00:00:00+00:00", topics=[],
+            )
+
+        def fake_discover(**kwargs):
+            for name in JS_TREES:
+                yield meta(name)
+
+        def fake_clone(repo_full_name, target_dir):
+            for rel, text in JS_TREES[repo_full_name].items():
+                write(Path(target_dir), rel, text)
+            return True
+
+        seen = []
+        real = _stratified_caps
+
+        def spy(counts, total_cap):
+            result = real(counts, total_cap)
+            seen.append((dict(counts), total_cap, result))
+            return result
+
+        with patch("sieve.pipeline.discover_repos", side_effect=fake_discover), \
+             patch("sieve.pipeline._fetch_quota", return_value=None), \
+             patch("sieve.pipeline._clone_repo", side_effect=fake_clone), \
+             patch("sieve.pipeline._stratified_caps", side_effect=spy), \
+             patch("sieve.pipeline.time.sleep"):
+            run_pipeline(config)
+
+        by_cap = {total: (counts, caps) for counts, total, caps in seen}
+        assert by_cap[8][0] == {"o/callbacks": 6, "o/classes": 6}
+        assert by_cap[8][1] == {"o/callbacks": 4, "o/classes": 4}
+        assert by_cap[2][0] == {"o/callbacks": 0, "o/classes": 2}
+        assert by_cap[2][1] == {"o/callbacks": 0, "o/classes": 2}

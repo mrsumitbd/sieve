@@ -266,6 +266,254 @@ def _clean_indentation(snippet: str) -> str:
     return lines[0] + "\n" + "\n".join(stripped_body)
 
 
+# ─── Definition Walks ────────────────────────────────────────────────────────
+#
+# One parse-only walk per language decides WHICH tree-sitter nodes are functions
+# and classes. It reads no metrics and builds no records. Both passes consume it:
+#
+#   Pass 2  extract_from_file -> _extract_<lang>   turns each _Definition into a record
+#   Pass 1  count_repo_contents                    counts the _Definitions
+#
+# so what Pass 1 counts is, by construction, what Pass 2 extracts. The rules of
+# each walk (what it descends into, what it stops at, the depth guard, forward
+# declarations, ...) are the extractor's long-standing behavior, moved here
+# unchanged; they are not a description of the language. For example the
+# JavaScript walk finds function declarations, class methods and arrow functions
+# bound by const/let/var, but not function expressions, callbacks, object-literal
+# methods or arrows nested inside another function, because the extractor never
+# produced records for those.
+
+# The walks stop descending past this depth (a guard against pathological nesting).
+_MAX_WALK_DEPTH = 200
+
+
+@dataclass(frozen=True, slots=True)
+class _Definition:
+    """A function or class node found by a walk, plus the context the walk had at that point."""
+    kind: str                       # "function" or "class"
+    node: object                    # the tree-sitter node the record is built from
+    parent_class: Optional[str] = None   # name of the enclosing class, if the walk was inside one
+    decorator_nodes: tuple = ()     # Python: decorator nodes of a decorated_definition
+    source_node: object = None      # Python: the decorated_definition wrapping `node`, else `node`
+
+
+def _python_class_name(node, source_bytes: bytes) -> str:
+    name_node = node.child_by_field_name("name")
+    return _node_text(name_node, source_bytes) if name_node else "unknown"
+
+
+def _java_class_name(node, source_bytes: bytes) -> str:
+    name_node = next((c for c in node.children if c.type == "identifier"), None)
+    return _node_text(name_node, source_bytes) if name_node else "unknown"
+
+
+def _js_class_name(node, source_bytes: bytes) -> str:
+    name_node = next((c for c in node.children if c.type == "identifier"), None)
+    return _node_text(name_node, source_bytes) if name_node else "unknown"
+
+
+def _cpp_class_name(node, source_bytes: bytes) -> str:
+    name_node = next((c for c in node.children if c.type == "type_identifier"), None)
+    if name_node is None:
+        # Template specializations (`class Array<T, N> { ... }`) wrap
+        # the name one level deeper: template_type -> type_identifier,
+        # rather than a direct-child type_identifier.
+        template_type_node = next((c for c in node.children if c.type == "template_type"), None)
+        if template_type_node is not None:
+            name_node = next(
+                (c for c in template_type_node.children if c.type == "type_identifier"), None
+            )
+    return _node_text(name_node, source_bytes) if name_node else "unknown"
+
+
+def _walk_python(root, source_bytes: bytes) -> list[_Definition]:
+    found: list[_Definition] = []
+
+    def walk(node, parent_class: Optional[str] = None, decorator_nodes: tuple = (), _depth: int = 0,
+             source_node=None):
+        if _depth > _MAX_WALK_DEPTH:
+            return
+        # source_node is the node whose text span should become `source_code`.
+        # It differs from `node` only when `node` is the inner definition of a
+        # decorated_definition — in that case source_node is the outer
+        # decorated_definition, so the decorator line(s) are not silently
+        # dropped from the extracted source. Defaults to `node` itself.
+        if source_node is None:
+            source_node = node
+
+        if node.type == "decorated_definition":
+            # Collect the decorators, then recurse into the inner definition
+            decorators = tuple(child for child in node.children if child.type == "decorator")
+            inner = next(
+                (child for child in node.children
+                 if child.type in ("function_definition", "async_function_definition", "class_definition")),
+                None,
+            )
+            if inner:
+                walk(inner, parent_class=parent_class, decorator_nodes=decorators, _depth=_depth + 1,
+                     source_node=node)
+            return
+
+        if node.type in ("function_definition", "async_function_definition"):
+            found.append(_Definition("function", node, parent_class, decorator_nodes, source_node))
+            for child in node.children:
+                walk(child, parent_class, _depth=_depth + 1)
+
+        elif node.type == "class_definition":
+            found.append(_Definition("class", node, parent_class, decorator_nodes, source_node))
+            class_name = _python_class_name(node, source_bytes)
+            for child in node.children:
+                if child.type == "block":
+                    for item in child.children:
+                        walk(item, parent_class=class_name, _depth=_depth + 1)
+        else:
+            for child in node.children:
+                walk(child, parent_class, _depth=_depth + 1)
+
+    walk(root)
+    return found
+
+
+def _walk_java(root, source_bytes: bytes) -> list[_Definition]:
+    found: list[_Definition] = []
+
+    def walk(node, parent_class: Optional[str] = None, _depth: int = 0):
+        if _depth > _MAX_WALK_DEPTH:
+            return
+        if node.type == "class_declaration":
+            found.append(_Definition("class", node, parent_class))
+            class_name = _java_class_name(node, source_bytes)
+            # Walk class body for methods
+            for child in node.children:
+                if child.type == "class_body":
+                    for item in child.children:
+                        walk(item, parent_class=class_name, _depth=_depth + 1)
+
+        elif node.type in ("method_declaration", "constructor_declaration"):
+            found.append(_Definition("function", node, parent_class))
+
+        else:
+            for child in node.children:
+                walk(child, parent_class, _depth=_depth + 1)
+
+    walk(root)
+    return found
+
+
+def _walk_js(root, source_bytes: bytes) -> list[_Definition]:
+    found: list[_Definition] = []
+
+    def walk(node, parent_class: Optional[str] = None, _depth: int = 0):
+        if _depth > _MAX_WALK_DEPTH:
+            return
+        if node.type == "class_declaration":
+            found.append(_Definition("class", node, parent_class))
+            class_name = _js_class_name(node, source_bytes)
+            # Walk class body for methods
+            for child in node.children:
+                if child.type == "class_body":
+                    for item in child.children:
+                        walk(item, parent_class=class_name, _depth=_depth + 1)
+
+        elif node.type in ("function_declaration", "method_definition"):
+            found.append(_Definition("function", node, parent_class))
+
+        elif node.type in ("lexical_declaration", "variable_declaration"):
+            # const/let/var arrowFunc = (x) => x * 2
+            for child in node.children:
+                if child.type == "variable_declarator":
+                    arrow = next(
+                        (c for c in child.children if c.type == "arrow_function"), None
+                    )
+                    if arrow:
+                        found.append(_Definition("function", arrow, parent_class))
+
+        else:
+            for child in node.children:
+                walk(child, parent_class, _depth=_depth + 1)
+
+    walk(root)
+    return found
+
+
+def _walk_cpp(root, source_bytes: bytes) -> list[_Definition]:
+    found: list[_Definition] = []
+
+    def walk(node, parent_class: Optional[str] = None, _depth: int = 0):
+        if _depth > _MAX_WALK_DEPTH:
+            return
+        if node.type == "class_specifier":
+            # Skip forward declarations — they have no body (field_declaration_list)
+            has_body = any(c.type == "field_declaration_list" for c in node.children)
+            if not has_body:
+                return
+
+            found.append(_Definition("class", node, parent_class))
+            class_name = _cpp_class_name(node, source_bytes)
+
+            # Walk into class body for methods
+            for child in node.children:
+                if child.type == "field_declaration_list":
+                    for item in child.children:
+                        # Templated methods (`template<class T> operator T*() ...`)
+                        # are wrapped in template_declaration; unwrap it.
+                        walk_item = item
+                        if item.type == "template_declaration":
+                            walk_item = next(
+                                (c for c in item.children if c.type == "function_definition"),
+                                None,
+                            )
+                        if walk_item is not None:
+                            walk(walk_item, parent_class=class_name, _depth=_depth + 1)
+
+        elif node.type == "function_definition":
+            found.append(_Definition("function", node, parent_class))
+
+        elif node.type == "template_declaration":
+            # Templates wrap function_definition or class_specifier — walk into them
+            for child in node.children:
+                if child.type in ("function_definition", "class_specifier"):
+                    walk(child, parent_class, _depth=_depth + 1)
+
+        elif node.type == "namespace_definition":
+            # Walk into namespaces transparently
+            for child in node.children:
+                if child.type == "declaration_list":
+                    for item in child.children:
+                        walk(item, parent_class, _depth=_depth + 1)
+
+        else:
+            for child in node.children:
+                walk(child, parent_class, _depth=_depth + 1)
+
+    walk(root)
+    return found
+
+
+_WALKS = {
+    "Python": _walk_python,
+    "Java": _walk_java,
+    "JavaScript": _walk_js,
+    "C++": _walk_cpp,
+}
+
+
+def _find_definitions(language: str, root, source_bytes: bytes) -> list[_Definition]:
+    """The functions and classes of a parsed file, in source order (a class before its methods)."""
+    try:
+        walk = _WALKS[language]
+    except KeyError:
+        raise ValueError(f"Unsupported language: {language}") from None
+    return walk(root, source_bytes)
+
+
+def _parse_definitions(source: str, language: str) -> list[_Definition]:
+    """Parse source and return its definitions: all that Pass 1 needs, nothing Pass 2 builds."""
+    parser, _ = _get_parser(language)
+    source_bytes = source.encode("utf-8")
+    return _find_definitions(language, parser.parse(source_bytes).root_node, source_bytes)
+
+
 # ─── Python Extraction ───────────────────────────────────────────────────────
 
 def _strip_python_string_literal(raw: str) -> str:
@@ -532,38 +780,13 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
     functions: list[FunctionRecord] = []
     classes: list[ClassRecord] = []
 
-    def walk(node, parent_class: Optional[str] = None, decorators: list[str] = None, _depth: int = 0,
-             source_node=None):
-        if _depth > 200:
-            return
-        if decorators is None:
-            decorators = []
-        # source_node is the node whose text span should become `source_code`.
-        # It differs from `node` only when `node` is the inner definition of a
-        # decorated_definition — in that case source_node is the outer
-        # decorated_definition, so the decorator line(s) are not silently
-        # dropped from the extracted source. Defaults to `node` itself.
-        if source_node is None:
-            source_node = node
+    for d in _find_definitions("Python", root, source_bytes):
+        node = d.node
+        parent_class = d.parent_class
+        source_node = d.source_node
+        decorators = [_node_text(n, source_bytes) for n in d.decorator_nodes]
 
-        if node.type == "decorated_definition":
-            # Collect all decorator texts, then recurse into the inner definition
-            dec_texts = [
-                _node_text(child, source_bytes)
-                for child in node.children
-                if child.type == "decorator"
-            ]
-            inner = next(
-                (child for child in node.children
-                 if child.type in ("function_definition", "async_function_definition", "class_definition")),
-                None,
-            )
-            if inner:
-                walk(inner, parent_class=parent_class, decorators=dec_texts, _depth=_depth + 1,
-                     source_node=node)
-            return
-
-        if node.type in ("function_definition", "async_function_definition"):
+        if d.kind == "function":
             name_node = node.child_by_field_name("name")
             func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
 
@@ -600,12 +823,8 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
                 decorators=decorators,
             ))
 
-            for child in node.children:
-                walk(child, parent_class, _depth=_depth + 1)
-
-        elif node.type == "class_definition":
-            name_node = node.child_by_field_name("name")
-            class_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+        else:
+            class_name = _python_class_name(node, source_bytes)
 
             bases_node = node.child_by_field_name("superclasses")
             parent_classes = []
@@ -670,15 +889,6 @@ def _extract_python(source: str, file_path: str, repo: str) -> tuple[list[Functi
                 end_line=node.end_point[0] + 1,
             ))
 
-            for child in node.children:
-                if child.type == "block":
-                    for item in child.children:
-                        walk(item, parent_class=class_name, _depth=_depth + 1)
-        else:
-            for child in node.children:
-                walk(child, parent_class, _depth=_depth + 1)
-
-    walk(root)
     return functions, classes
 
 
@@ -794,13 +1004,12 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
     functions: list[FunctionRecord] = []
     classes: list[ClassRecord] = []
 
-    def walk(node, parent_class: Optional[str] = None, _depth: int = 0):
-        if _depth > 200:
-            return
-        if node.type == "class_declaration":
-            # Class name
-            name_node = next((c for c in node.children if c.type == "identifier"), None)
-            class_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+    for d in _find_definitions("Java", root, source_bytes):
+        node = d.node
+        parent_class = d.parent_class
+
+        if d.kind == "class":
+            class_name = _java_class_name(node, source_bytes)
 
             # Superclass
             parent_classes = []
@@ -859,13 +1068,7 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
                 end_line=node.end_point[0] + 1,
             ))
 
-            # Walk class body for methods
-            for child in node.children:
-                if child.type == "class_body":
-                    for item in child.children:
-                        walk(item, parent_class=class_name, _depth=_depth + 1)
-
-        elif node.type in ("method_declaration", "constructor_declaration"):
+        else:
             name_node = next((c for c in node.children if c.type == "identifier"), None)
             func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
 
@@ -927,11 +1130,6 @@ def _extract_java(source: str, file_path: str, repo: str) -> tuple[list[Function
                 decorators=method_annotations,
             ))
 
-        else:
-            for child in node.children:
-                walk(child, parent_class, _depth=_depth + 1)
-
-    walk(root)
     return functions, classes
 
 
@@ -1105,90 +1303,6 @@ def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRe
     functions: list[FunctionRecord] = []
     classes: list[ClassRecord] = []
 
-    def walk(node, parent_class: Optional[str] = None, _depth: int = 0):
-        if _depth > 200:
-            return
-        if node.type == "class_declaration":
-            name_node = next((c for c in node.children if c.type == "identifier"), None)
-            class_name = _node_text(name_node, source_bytes) if name_node else "unknown"
-
-            parent_classes = []
-            for child in node.children:
-                if child.type == "class_heritage":
-                    for sub in child.children:
-                        if sub.type == "identifier":
-                            parent_classes.append(_node_text(sub, source_bytes))
-
-            docstring = _js_preceding_comment(node, source_bytes)
-            source_code = _clean_indentation(_node_text(node, source_bytes))
-            skeleton = _build_js_skeleton(node, source_bytes)
-            used_imports = _filter_used_imports(file_imports, source_code)
-
-            method_names = []
-            has_constructor = False
-            for child in node.children:
-                if child.type == "class_body":
-                    for item in child.children:
-                        if item.type == "method_definition":
-                            mn = next((c for c in item.children if c.type == "property_identifier"), None)
-                            if mn:
-                                mname = _node_text(mn, source_bytes)
-                                method_names.append(mname)
-                                if mname == "constructor":
-                                    has_constructor = True
-
-            classes.append(ClassRecord(
-                repo=repo,
-                file_path=file_path,
-                language="JavaScript",
-                class_name=class_name,
-                parent_classes=parent_classes,
-                docstring=docstring,
-                source_code=source_code,
-                skeleton=skeleton,
-                used_imports=used_imports,
-                method_names=method_names,
-                method_count=len(method_names),
-                has_constructor=has_constructor,
-                decorators=[],
-                start_line=node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-            ))
-
-            # Walk class body for methods
-            for child in node.children:
-                if child.type == "class_body":
-                    for item in child.children:
-                        walk(item, parent_class=class_name, _depth=_depth + 1)
-
-        elif node.type == "function_declaration":
-            name_node = next((c for c in node.children if c.type == "identifier"), None)
-            func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
-            _append_js_function(node, func_name, parent_class)
-
-        elif node.type == "method_definition":
-            name_node = next((c for c in node.children if c.type == "property_identifier"), None)
-            func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
-            _append_js_function(node, func_name, parent_class)
-
-        elif node.type in ("lexical_declaration", "variable_declaration"):
-            # const/let/var arrowFunc = (x) => x * 2
-            for child in node.children:
-                if child.type == "variable_declarator":
-                    arrow = next(
-                        (c for c in child.children if c.type == "arrow_function"), None
-                    )
-                    if arrow:
-                        name_node = next(
-                            (c for c in child.children if c.type == "identifier"), None
-                        )
-                        func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
-                        _append_js_function(arrow, func_name, parent_class, is_arrow=True)
-
-        else:
-            for child in node.children:
-                walk(child, parent_class, _depth=_depth + 1)
-
     def _append_js_function(node, func_name: str, parent_class: Optional[str], is_arrow: bool = False):
         params = []
         for child in node.children:
@@ -1259,7 +1373,70 @@ def _extract_js(source: str, file_path: str, repo: str) -> tuple[list[FunctionRe
             decorators=[],
         ))
 
-    walk(root)
+    for d in _find_definitions("JavaScript", root, source_bytes):
+        node = d.node
+
+        if d.kind == "class":
+            class_name = _js_class_name(node, source_bytes)
+
+            parent_classes = []
+            for child in node.children:
+                if child.type == "class_heritage":
+                    for sub in child.children:
+                        if sub.type == "identifier":
+                            parent_classes.append(_node_text(sub, source_bytes))
+
+            docstring = _js_preceding_comment(node, source_bytes)
+            source_code = _clean_indentation(_node_text(node, source_bytes))
+            skeleton = _build_js_skeleton(node, source_bytes)
+            used_imports = _filter_used_imports(file_imports, source_code)
+
+            method_names = []
+            has_constructor = False
+            for child in node.children:
+                if child.type == "class_body":
+                    for item in child.children:
+                        if item.type == "method_definition":
+                            mn = next((c for c in item.children if c.type == "property_identifier"), None)
+                            if mn:
+                                mname = _node_text(mn, source_bytes)
+                                method_names.append(mname)
+                                if mname == "constructor":
+                                    has_constructor = True
+
+            classes.append(ClassRecord(
+                repo=repo,
+                file_path=file_path,
+                language="JavaScript",
+                class_name=class_name,
+                parent_classes=parent_classes,
+                docstring=docstring,
+                source_code=source_code,
+                skeleton=skeleton,
+                used_imports=used_imports,
+                method_names=method_names,
+                method_count=len(method_names),
+                has_constructor=has_constructor,
+                decorators=[],
+                start_line=node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+            ))
+
+        elif node.type == "arrow_function":
+            # const/let/var arrowFunc = (x) => x * 2 -- the walk found the arrow
+            # as a child of its variable_declarator, which holds the name.
+            name_node = next((c for c in node.parent.children if c.type == "identifier"), None)
+            func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+            _append_js_function(node, func_name, d.parent_class, is_arrow=True)
+
+        else:
+            # function_declaration names itself with an identifier, a
+            # method_definition with a property_identifier.
+            name_type = "identifier" if node.type == "function_declaration" else "property_identifier"
+            name_node = next((c for c in node.children if c.type == name_type), None)
+            func_name = _node_text(name_node, source_bytes) if name_node else "unknown"
+            _append_js_function(node, func_name, d.parent_class)
+
     return functions, classes
 
 
@@ -1560,32 +1737,12 @@ def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionR
     functions: list[FunctionRecord] = []
     classes: list[ClassRecord] = []
 
-    def walk(node, parent_class: Optional[str] = None, _depth: int = 0):
-        if _depth > 200:
-            return
-        if node.type == "class_specifier":
-            # Skip forward declarations — they have no body (field_declaration_list)
-            has_body = any(c.type == "field_declaration_list" for c in node.children)
-            if not has_body:
-                return
+    for d in _find_definitions("C++", root, source_bytes):
+        node = d.node
+        parent_class = d.parent_class
 
-            name_node = next(
-                (c for c in node.children if c.type == "type_identifier"), None
-            )
-            if name_node is None:
-                # Template specializations (`class Array<T, N> { ... }`) wrap
-                # the name one level deeper: template_type -> type_identifier,
-                # rather than a direct-child type_identifier.
-                template_type_node = next(
-                    (c for c in node.children if c.type == "template_type"), None
-                )
-                if template_type_node is not None:
-                    name_node = next(
-                        (c for c in template_type_node.children if c.type == "type_identifier"),
-                        None,
-                    )
-            class_name = _node_text(name_node, source_bytes) if name_node else "unknown"
-
+        if d.kind == "class":
+            class_name = _cpp_class_name(node, source_bytes)
             # Base classes
             parent_classes = []
             for child in node.children:
@@ -1643,20 +1800,7 @@ def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionR
                 end_line=node.end_point[0] + 1,
             ))
 
-            # Walk into class body for methods
-            for child in node.children:
-                if child.type == "field_declaration_list":
-                    for item in child.children:
-                        walk_item = item
-                        if item.type == "template_declaration":
-                            walk_item = next(
-                                (c for c in item.children if c.type == "function_definition"),
-                                None,
-                            )
-                        if walk_item is not None:
-                            walk(walk_item, parent_class=class_name, _depth=_depth + 1)
-
-        elif node.type == "function_definition":
+        else:
             func_name = _cpp_function_name(node, source_bytes)
 
             # An out-of-class definition (`ResourceLoader::load(...) { ... }`)
@@ -1700,24 +1844,6 @@ def _extract_cpp(source: str, file_path: str, repo: str) -> tuple[list[FunctionR
                 decorators=[],
             ))
 
-        elif node.type == "template_declaration":
-            # Templates wrap function_definition or class_specifier — walk into them
-            for child in node.children:
-                if child.type in ("function_definition", "class_specifier"):
-                    walk(child, parent_class, _depth=_depth + 1)
-
-        elif node.type == "namespace_definition":
-            # Walk into namespaces transparently
-            for child in node.children:
-                if child.type == "declaration_list":
-                    for item in child.children:
-                        walk(item, parent_class, _depth=_depth + 1)
-
-        else:
-            for child in node.children:
-                walk(child, parent_class, _depth=_depth + 1)
-
-    walk(root)
     return functions, classes
 
 
@@ -1983,42 +2109,28 @@ def count_repo_contents(
     granularities: list[str],
 ) -> tuple[int, int]:
     """
-    Lightweight pass 1: count extractable functions and classes in a repo
-    without full extraction. Uses tree-sitter node counting only.
+    Pass 1: count the functions and classes that extract_from_repo would
+    extract from a repo, without extracting them.
 
-    Pass 1 and Pass 2 (extract_from_repo) select the same files, because both
-    go through _iter_source_files. The counts can still differ from what the
-    extractors return on individual files, since this function counts raw node
-    types while the extractors walk the tree their own way (for example it
-    also counts methods of anonymous classes and C++ forward declarations,
-    and counts JavaScript `function` keyword tokens). That is a node-level
-    difference, not a file-selection one; see
-    tests/test_pass_consistency.py::TestKnownNodeLevelDivergences.
+    The count is exact, not an estimate. Pass 1 and Pass 2 select the same
+    files (both go through _iter_source_files and apply the same minified-JS
+    rule) and find the same definitions in each file (both consume
+    _find_definitions, the one parse-only walk per language), so with no caps
+    the two return the same numbers. Nothing else is done here: no records are
+    built, no metrics or AST features are computed and no imports are
+    collected.
+
+    The one thing Pass 1 cannot see is a file Pass 2 gives up on while building
+    its records (an unexpected error in record building); the walk itself fails
+    identically in both.
 
     Returns:
-        (num_functions, num_classes)
+        (num_functions, num_classes); a count for a granularity that is not
+        requested is 0.
     """
     extensions = LANGUAGE_EXTENSIONS.get(language, set())
     num_functions = 0
     num_classes   = 0
-
-    # Node types that represent functions and classes per language
-    FUNC_TYPES = {
-        "Python":     {"function_definition", "async_function_definition"},
-        "Java":       {"method_declaration", "constructor_declaration"},
-        "JavaScript": {"function_declaration", "function", "arrow_function",
-                       "method_definition"},
-        "C++":        {"function_definition"},
-    }
-    CLASS_TYPES = {
-        "Python":     {"class_definition"},
-        "Java":       {"class_declaration"},
-        "JavaScript": {"class_declaration"},
-        "C++":        {"class_specifier"},
-    }
-
-    func_types  = FUNC_TYPES.get(language, set())
-    class_types = CLASS_TYPES.get(language, set())
 
     root = Path(repo_path)
 
@@ -2033,32 +2145,15 @@ def count_repo_contents(
             if language == "JavaScript" and _looks_minified_js(source):
                 continue
 
-            parser = _get_parser(language)
-            if parser is None:
-                continue
-            parser, _ = parser
-            tree = parser.parse(source.encode("utf-8"))
-
-            def _count(node):
-                fc, cc = 0, 0
-                if node.type in func_types:
-                    fc += 1
-                if node.type in class_types:
-                    cc += 1
-                for child in node.children:
-                    cf, cl = _count(child)
-                    fc += cf
-                    cc += cl
-                return fc, cc
-
-            fc, cc = _count(tree.root_node)
-            if "function" in granularities:
-                num_functions += fc
-            if "class" in granularities:
-                num_classes += cc
-
+            definitions = _parse_definitions(source, language)
         except Exception:
             continue
+
+        fc = sum(1 for d in definitions if d.kind == "function")
+        if "function" in granularities:
+            num_functions += fc
+        if "class" in granularities:
+            num_classes += len(definitions) - fc
 
     return num_functions, num_classes
 
