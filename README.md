@@ -88,6 +88,12 @@ For development and testing:
 pip install -r requirements-dev.txt
 ```
 
+Check the install:
+```bash
+sieve --help
+```
+If `sieve: command not found`, activate the virtual environment, or run `python -m sieve.cli --help`.
+
 On an Intel Mac (x86_64), PyTorch has no wheels after 2.2.2, which needs extra pins. See *Install troubleshooting* on the Documentation page.
 
 **4. Set up your GitHub token**
@@ -134,15 +140,63 @@ By default a GitHub rate limit that will not clear within about a minute stops t
 
 ### Python API
 
+`run_pipeline(config)` takes a `SIEVEConfig` and returns a summary dictionary (counts, `output_paths`, `failed_repos`, per-repository metadata). It takes an optional `progress_callback(message, current, total)`. The CLI and the web UI call nothing else. The next section shows a complete listing.
+
+---
+
+## Worked Example
+
+A researcher is building a corpus of engineered Python repositories created between 2024-06-01 and 2025-06-01, with at least 50 stars and 5 contributors. The corpus is limited to 20 repositories, 30 functions and 30 classes, and each record gets an AI-generated-code score. The three forms below build the same configuration. Deduplication is off unless you ask for it (`--deduplicate`), so it is off here; the other options keep their defaults (both granularities, JSONL output).
+
+**1. CLI**
+
+```bash
+export GITHUB_TOKEN=<your token>       # or put it in .env
+sieve run --language Python \
+          --start-date 2024-06-01 --end-date 2025-06-01 \
+          --min-stars 50 --min-contributors 5 \
+          --max-repos 20 --max-functions 30 --max-classes 30 \
+          --engineered-only --annotate-llm-score \
+          --output-dir ./my_corpus
+```
+
+**2. JSON config for `--config`**
+
+`my_config.json`:
+```json
+{
+  "language": "Python",
+  "start_date": "2024-06-01",
+  "end_date": "2025-06-01",
+  "min_stars": 50,
+  "min_contributors": 5,
+  "max_repos": 20,
+  "max_functions": 30,
+  "max_classes": 30,
+  "engineered_only": true,
+  "annotate_llm_score": true,
+  "output_dir": "./my_corpus"
+}
+```
+```bash
+sieve validate-config my_config.json   # checks the file and prints the full configuration
+sieve run --config my_config.json      # with --config, every other flag is ignored
+```
+`end_date` is required in a config file (the CLI defaults it to 30 days before today). `GITHUB_TOKEN` is read from the environment, so the token does not have to be written in the file.
+
+**3. Python API**
+
 ```python
+import os
 from datetime import date
+
 from sieve.config import SIEVEConfig
 from sieve.pipeline import run_pipeline
 
 config = SIEVEConfig(
     language="Python",
-    start_date=date(2024, 6, 1),   # repo creation lower bound (e.g. a model's release date)
-    end_date=date(2025, 6, 1),     # repo creation upper bound
+    start_date=date(2024, 6, 1),   # repository creation lower bound
+    end_date=date(2025, 6, 1),     # repository creation upper bound
     min_stars=50,
     min_contributors=5,
     max_repos=20,
@@ -151,12 +205,23 @@ config = SIEVEConfig(
     engineered_only=True,
     annotate_llm_score=True,
     output_dir="./my_corpus",
-    export_format="both",          # "jsonl", "parquet", or "both"
+    github_token=os.environ.get("GITHUB_TOKEN"),   # the API does not read the environment by itself
 )
 
 summary = run_pipeline(config)
-print(summary)
+print(summary["total_functions"])
+print(summary["output_paths"])
 ```
+
+The run writes `functions.jsonl`, `classes.jsonl` and `manifest.json` to `./my_corpus`; `output_paths` maps each written file to its path. The engineered filter runs after the repository cap, so fewer than 20 repositories may remain. The classifier weights are downloaded from the Hugging Face Hub on the first scored run (see below).
+
+---
+
+## AI-Generated-Code Score
+
+`annotate_llm_score` adds `llm_score` to each record: the estimated probability that the snippet is AI-generated, from a fine-tuned [CodeBERT](https://huggingface.co/microsoft/codebert-base) classifier. The classifier weights are hosted on the Hugging Face Hub at **[mrahman2025/sieve-llm-classifier](https://huggingface.co/mrahman2025/sieve-llm-classifier)** (`best_model.pt`). They are downloaded on first use and cached; if `src/sieve/models/artifacts/best_model.pt` exists it is used instead.
+
+`llm_score` is a probabilistic signal, not evidence of authorship. The classifier was trained on code from nine LLMs and evaluated on a held-out set that shares its generators with the training data, so that evaluation does not show how the score behaves on code from other LLMs. See the **About the Classifier** page and the Documentation page (*AI-Generated-Code Score*) for how scoring runs and its limits.
 
 ---
 
@@ -197,6 +262,8 @@ Notes:
 ---
 
 ## Output Schema
+
+The record examples below are abbreviated. The *Record Schema* section of the Documentation page lists every field of both record types with its type and meaning.
 
 ### Function/Method records (`functions.jsonl`) — CodeSearchNet-compatible
 
@@ -260,7 +327,7 @@ Notes:
 
 ### Manifest (`manifest.json`)
 
-A JSON file capturing the config (never any token), per-repo metadata and summary statistics. Share it to let others reproduce the same corpus. It records:
+A JSON file capturing the config (never any token), per-repo metadata and summary statistics. Share it so others can see how the corpus was built (a rerun can give a different corpus, see *Known Limitations*). The full layout, with the fields that can be `null`, is under *manifest.json Layout* on the Documentation page. It records:
 
 - `sieve_version`, `generated_at`, `config`, `repos` (one entry per processed repository, with the star count and other metadata as collected) and `summary` (`total_repos`, `total_functions`, `total_classes`, `total_llm_scored`, `total_llm_score_truncated`).
 - `discovery`: whether the repository search covered everything that matched, the windows it used, single days that held more than 1,000 repositories, repositories dropped because their contributors could not be fetched, and how long the run waited on rate limits.
@@ -319,8 +386,21 @@ The full list is on the Documentation page. In short:
 - **Skipped directories.** `vendor`, `vendored`, `third_party`, `third-party`, `site-packages`, `node_modules`, `dist`, `build`, `venv`, `.venv`, `.tox` and `.eggs` are skipped, at any depth. `external` and `env` are not skipped.
 - **Test-file rules are not language-specific.** A file name that starts with `Test` is dropped in every language (so `Testimonials.js` too), and `test/`, `tests/`, `__tests__/`, `spec/` and `specs/` directories are skipped. `*Tests.java`, `*IT.java`, `*.test.jsx` and `foo_test.h` are not treated as tests.
 - **A narrow Pass 1 / Pass 2 gap.** Pass 1 counts exactly what Pass 2 extracts, except that a file which parses but fails while its records are built is counted in Pass 1 and dropped in Pass 2.
+- **The AI-generation score is an estimate.** It is a probabilistic signal, not evidence of authorship, and its evaluation does not cover LLMs outside the training data.
 - **Sequential processing.** Repositories are processed one after another, not in parallel, so large runs are slow.
 - **C++ parsing is slower than other languages.** C++ extraction takes 2–5× longer than Python, Java or JavaScript repositories of comparable size. This is a known limitation of `tree-sitter-cpp`: C++ has syntactic ambiguities (e.g. `a * b` can be a multiplication or a pointer declaration) that require Generalized LR (GLR) parsing, which is more expensive than the deterministic LR(1) parsing used for the other languages.
+
+---
+
+## Documentation
+
+The web UI has a **Documentation** page and an **About the Classifier** page in its sidebar (on the [live demo](https://mrahman2025-sieve.hf.space), or locally with `streamlit run src/sieve/ui/Home.py`). The Documentation page covers every parameter, the record schemas, the 22 metrics, the engineered-project filter, deduplication, the `manifest.json` layout, dependency extraction, the architecture and how to extend SIEVE. The **FAQ** page answers common questions.
+
+---
+
+## License
+
+SIEVE is released under the MIT License. See [`LICENSE`](LICENSE).
 
 ---
 

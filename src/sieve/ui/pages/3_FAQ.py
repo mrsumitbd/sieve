@@ -255,6 +255,20 @@ with st.expander("How accurate is the LLM Score?"):
     See the **About the Classifier** page for full details.
     """)
 
+with st.expander("Does a high LLM Score show that an LLM wrote the code?"):
+    st.markdown("""
+    No. `llm_score` is a probabilistic signal, not evidence of authorship. A high score means the snippet
+    resembles the AI-generated examples the classifier was trained on; a low score does not show that a
+    person wrote it.
+
+    The classifier was trained on code from nine LLMs and evaluated on a held-out split of the same
+    dataset, so the AI-generated test examples come from the same generators as the training examples. The
+    evaluation does not show how the score behaves on code from LLMs outside the training data, such as
+    newer models. Very short snippets can get unreliable scores, and a snippet longer than 512 tokens is
+    scored on its first 512 only (`llm_score_truncated` is `true`). Use the score to screen or compare
+    groups of records. See **AI-Generated-Code Score** on the Documentation page.
+    """)
+
 with st.expander("Why does the first run with LLM Score take longer?"):
     st.markdown("""
     The classifier weights (~500MB) are hosted on HuggingFace Hub and downloaded
