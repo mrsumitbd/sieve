@@ -5,12 +5,17 @@ Main orchestrator. Ties together:
   discovery → (optional: quality scoring) → acquisition
   → extraction → deduplication → export
 
-When engineered_only=True, discovery runs in two phases:
-  Phase 1: collect all candidate repos + their quality metrics
-  Phase 2: compute population-level Q1 thresholds, filter, then clone
+Discovery is a generator, but the pipeline reads it to the end into a list
+before any repository is cloned, so the full candidate list is known first.
 
-When engineered_only=False, repos are processed as they are discovered
-(streaming, lower memory footprint).
+When engineered_only=True, that list is then filtered in two phases:
+  Phase 1: collect quality metrics for all candidate repos
+  Phase 2: compute population-level Q1 thresholds and keep the passing repos
+
+When engineered_only=False, the list goes straight to extraction.
+
+Either way, repositories are cloned one at a time during extraction, after
+discovery has finished.
 """
 
 import logging

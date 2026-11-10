@@ -49,8 +49,8 @@ class SIEVEConfig(BaseModel):
     min_stars: int = Field(default=10, ge=0, description="Minimum number of GitHub stars")
     min_contributors: int = Field(default=1, ge=1, description="Minimum number of unique contributors")
     max_repos: Optional[int] = Field(default=None, description="Cap on number of repos to process. None (default) = no cap; otherwise must be >= 1")
-    max_functions: Optional[int] = Field(default=None, description="Cap on total functions after deduplication, stratified by repo. None (default) = no cap; otherwise must be >= 1. To skip functions, drop 'function' from granularity")
-    max_classes: Optional[int] = Field(default=None, description="Cap on total classes after deduplication, stratified by repo. None (default) = no cap; otherwise must be >= 1. To skip classes, drop 'class' from granularity")
+    max_functions: Optional[int] = Field(default=None, description="Cap on total functions, stratified by repo. Applied before deduplication; records that deduplication removes are not replaced, so the final count can be below the cap. None (default) = no cap; otherwise must be >= 1. To skip functions, drop 'function' from granularity")
+    max_classes: Optional[int] = Field(default=None, description="Cap on total classes, stratified by repo. Applied before deduplication; records that deduplication removes are not replaced, so the final count can be below the cap. None (default) = no cap; otherwise must be >= 1. To skip classes, drop 'class' from granularity")
 
     @field_validator("max_repos", "max_functions", "max_classes")
     @classmethod
