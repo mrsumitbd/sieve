@@ -67,6 +67,51 @@ on which parameters you configure:
 - **General-purpose corpus building.** The creation-date filter is equally useful for bounding a corpus to a specific development era for longitudinal studies, independent of any LLM, or simply source a richly-annotated, deduplicated corpus for any language-specific study.
 """)
 
+st.subheader("For researchers")
+st.markdown("""
+**What you can do.** Build a corpus of functions, classes or both for one language, bounded by repository
+creation date, stars, contributors and, optionally, the engineered-project filter. Compare records on the
+22 structural metrics, the AST summary features and, if enabled, `llm_score`. Read each repository's
+license, topics, test-suite signal and declared dependencies from `manifest.json`. The manifest also
+stores the configuration, the SIEVE version and the time each repository was collected, and every record
+carries the commit that was cloned, so a run can be described and repeated. A repeat is not guaranteed to
+give the same corpus (see **Known Limitations**).
+
+**Caveat.** A creation-date filter bounds the age of the *repository*, not of the code in it. A repository
+created after a model's training cutoff can contain code copied from older sources, so the filter does not
+guarantee that the code was unseen by an LLM, or that it is original. SIEVE does not check where individual
+snippets came from. State the bound and this limit when you report results.
+""")
+
+st.subheader("For practitioners")
+st.markdown("""
+**What you can do.** Survey a set of repositories in one language: for example, list the functions with the
+highest `cyclomatic_complexity` or `max_nesting_depth`, or the lowest `maintainability_index`, to see where
+the structurally heavy code sits. Read `dependencies` to see which libraries and version constraints the
+selected repositories declare. Use `signature`, `docstring` and `used_imports` to assemble examples for a
+code-search index, a prompt set or an internal benchmark from repositories you choose.
+
+**Caveat.** The metrics are structural proxies computed on an isolated snippet. On their own they are not
+measures of difficulty or quality: a high complexity value does not mean the code is wrong, and a high
+maintainability index does not mean it is good. The repositories carry many different licenses
+(`license_spdx` is recorded per repository in the manifest, and SIEVE does not check whether a particular
+use is allowed), so check licenses before reusing code.
+""")
+
+st.subheader("For educators")
+st.markdown("""
+**What you can do.** Select examples by size and structure, for instance functions in a `sloc` or
+`cyclomatic_complexity` range, to build graded material. A function's `signature` (header and docstring,
+no implementation) or a class's `skeleton` can serve as an exercise prompt, with `source_code` as the
+reference solution. `used_imports` makes a snippet closer to self-contained, and `commit_sha`, `file_path`
+and `start_line` link a record back to its place in the original repository.
+
+**Caveat.** The metrics are structural proxies, not measures of how hard an exercise is for a student, and
+they are not a grade of the code's quality. Records are real-world code, not curated exercises: SIEVE does
+not run it or attach tests to it, and it can depend on code elsewhere in its repository. The creation date
+does not tell you that learners, or the LLMs they use, have not seen the code.
+""")
+
 st.divider()
 
 # ─── Contamination-Aware Evaluation ────────────────────────────────────────────
@@ -370,8 +415,8 @@ st.markdown("""
 | **Min Stars** | Minimum GitHub star count. Higher values bias toward popular, well-maintained projects but reduce diversity. |
 | **Min Contributors** | Minimum number of human contributors, at least 1. Helps exclude personal or toy projects. Bots are not counted, and the count is exact (see **Repository Discovery**). |
 | **Max Repos** | Cap on the number of repos to process. Applies during discovery, before cloning. Web UI: `0` = no cap (default 20). CLI and config file: omit it (`null`) for no cap, otherwise it must be at least 1. |
-| **Max Functions** | Cap on total extracted functions *after deduplication*. Web UI: `0` = no cap (default 30). CLI and config file: omit it for no cap, otherwise at least 1. When the corpus exceeds the cap, stratified sampling is applied (see below). |
-| **Max Classes** | Cap on total extracted classes *after deduplication*. Same rules and stratified sampling as **Max Functions**. |
+| **Max Functions** | Upper bound on the total number of function records in the output. Web UI: `0` = no cap (default 30). CLI and config file: omit it for no cap, otherwise at least 1. The cap is divided across repositories before extraction (see **Corpus Size Caps & Stratified Sampling**). Deduplication runs afterwards and its removals are not refilled, so the final count can be below the cap. |
+| **Max Classes** | Upper bound on the total number of class records in the output. Same rules as **Max Functions**. |
 
 The `0` = no cap convention exists in the web UI only. The CLI and config reject `0` and negative
 numbers. To skip functions or classes, do not extract that level (see **Granularity** below).
@@ -389,12 +434,12 @@ st.subheader("Deduplication")
 st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
-| **Deduplicate** | Enable MinHash LSH near-duplicate removal across all extracted records. **Off by default in every interface** (CLI `--deduplicate`, config `deduplicate`, web UI **Deduplicate** toggle). |
+| **Deduplicate** | Enable MinHash LSH near-duplicate removal across the records of each granularity (functions and classes separately). **Off by default in every interface** (CLI `--deduplicate`, config `deduplicate`, web UI **Deduplicate** toggle). |
 | **Similarity Threshold** | Jaccard similarity threshold for MinHash deduplication (0.0–1.0; the web UI slider covers 0.5–1.0). Higher values are more conservative — only near-identical code is removed. Default: 0.8. Used only when deduplication is on. |
 
-Deduplication tokenizes source code (stripping string literals and normalizing whitespace) before
-hashing, so superficial differences like renamed variables or changed comments do not prevent
-duplicate detection.
+Deduplication compares sets of tokens after replacing string literals and collapsing whitespace.
+Identifiers and comments are not normalized, so renamed variables lower the similarity. See
+**Deduplication** below for the tokenization, the index and which record of a cluster is kept.
 """)
 
 st.subheader("Annotation and Output")
@@ -597,14 +642,20 @@ under **Known Limitations**). SIEVE then splits the cap across repositories as f
 No repository is ever allocated more records than it has, and the allocations add up to the
 cap (or to the total available, if that is smaller). Within a repository, the allocated
 records are the first ones found while walking its files in a fixed order (see **What Extraction
-Skips**), not a random draw, so the same repository state gives the same records. Random sampling
-without replacement is used only in a final safety-net step, which applies if the corpus still
-exceeds the cap after deduplication.
+Skips**), not a random draw, so the same repository state gives the same records. A random draw,
+proportional to each repository's share of the records, is used only in a final safety-net step, which
+applies if the corpus still exceeds the cap after deduplication.
 
-**Shortfall (Pass 3).** Pass 2 extracts more than each repository's allocation (twice the cap, at most
-50 more) and keeps the surplus. If a repository yields less than its allocation, the missing records
-are filled first from other repositories' surplus and then, if still short, by cloning repositories
-that have records left. Pass 1 runs only when **Max Functions** or **Max Classes** is set.
+**Surplus buffer and shortfall (Pass 3).** Pass 2 extracts more than each repository's allocation: up to
+the smaller of twice the allocation and the allocation plus 50. The first `allocation` records are kept
+and the rest stay in memory as a surplus. If the kept records fall short of the cap (for example because
+a repository yielded less than its allocation, or failed), the missing records are taken first from the
+surplus of the other repositories, in the order the repositories were processed, and then, if still short,
+by cloning again the repositories that have records left, the ones with the most remaining records first.
+A repository that returned nothing despite having an allocation is not cloned again. Pass 1 runs only
+when **Max Functions** or **Max Classes** is set. A repository whose clone failed in Pass 1 has no
+allocation and is extracted without a per-repository limit in Pass 2; the final cap still applies. See
+**Architecture Overview**.
 
 **Example:** cap = 20, corpus = TheAlgorithms (276 classes), system-design-primer (52 classes).
 Each repository first gets 1 slot, leaving 18. These are split in proportion to 275 and 51
@@ -615,6 +666,63 @@ final allocation is TheAlgorithms 16, system-design-primer 4.
 If your corpus is dominated by one repository (e.g. a large algorithm collection), the sample
 will reflect that. If you need balanced representation across repos, use the **Engineered Projects**
 filter or set **Max Repos** to a small number of carefully chosen repositories.
+""")
+
+st.divider()
+
+# ─── Deduplication ────────────────────────────────────────────────────────────
+
+st.header("Deduplication")
+st.markdown("""
+Deduplication is **off by default** (CLI `--deduplicate`, config `deduplicate`, web UI **Deduplicate**
+toggle). When it is on, it removes near-duplicate records using MinHash with locality-sensitive hashing
+(the `datasketch` library). This is what the code in `sieve/core/deduplication.py` does.
+
+**Where it runs.** After extraction and the shortfall refill, before the final cap and before LLM
+scoring. Records that deduplication removes are not replaced, so with caps set the final corpus can be
+smaller than the cap.
+
+**Per granularity, across repositories.** Function records and class records are deduplicated separately,
+each with its own index, so a function is never compared with a class. Within one granularity, all
+repositories are compared with each other, not only records of the same repository.
+
+**Tokenization.** For each record the `source_code` is turned into a set of tokens:
+
+1. Runs of whitespace are collapsed into one space.
+2. String literals are replaced by the placeholder `STR`: first triple-quoted strings (three double quotes or three
+   single quotes), then double-quoted and single-quoted strings. The quote characters stay as tokens.
+3. Tokens are identifiers (a letter or underscore followed by letters, digits or underscores) and each
+   remaining single punctuation character.
+
+What this means in practice:
+
+- Identifiers are kept as written. Renaming a variable or a parameter changes the token set and lowers the
+  similarity.
+- Comments are not removed. The words in a comment, and its `#` or `//` characters, are tokens.
+- Number literals produce no tokens, because digits are matched neither as identifiers nor as punctuation.
+  Only letters inside a number, such as the `xFF` of `0xFF`, are kept. Letters outside ASCII are dropped too.
+- The comparison is between *sets* of distinct tokens: the order of the tokens and how often a token
+  occurs do not matter.
+
+As an illustration, for a two-line Python function, renaming its two parameters lowered the estimated
+similarity to about 0.68, which is under the default threshold, while adding one comment line left it at
+about 0.82.
+
+**MinHash and threshold.** Each token set gets a MinHash signature with **128 permutations** (fixed; it is
+not a setting of `SIEVEConfig`). The index is a `MinHashLSH` with the threshold `dedup_threshold` (default
+**0.8**; a value from 0 to 1, where higher removes only closer duplicates). The similarity is an estimate of
+the Jaccard similarity of the token sets, and LSH is probabilistic: pairs close to the threshold may or may
+not be matched.
+
+**Which record is kept.** Records are visited in list order. Each record is looked up in the index of the
+records kept so far: if the index already holds a match, the record is dropped, otherwise it is kept and
+added to the index. So the first record of a cluster in list order is kept and the later ones are dropped.
+List order is the order in which repositories were processed, then the order of files within a repository
+(each directory's files sorted by name, then its subdirectories), then any records added by the shortfall
+refill. A dropped record is never added to the index. Records with an empty `source_code` are always kept.
+
+The number of records removed is written to the log (`Deduplication: N → M items`). It is not stored in
+`manifest.json`, which records only `deduplicate` and `dedup_threshold` in its `config`.
 """)
 
 st.divider()
@@ -680,38 +788,54 @@ st.divider()
 
 st.header("Engineered Projects Filter")
 st.markdown("""
-Enabling **Engineered Projects Only** applies a three-stage quality filter based on
-[Xiao et al. (2025)](https://arxiv.org/abs/2507.10422) and the REAPER methodology
-([Munaiah et al., 2017](https://doi.org/10.1007/s10664-017-9512-6)):
+Enabling **Engineered Projects Only** applies a three-stage filter to the discovered repositories before
+any of them is cloned. The code in `sieve/core/quality.py` cites two references: Xiao et al. (2025),
+"Self-Admitted GenAI Usage in Open-Source Software"
+([arXiv](https://arxiv.org/abs/2507.10422)), and Munaiah et al. (2017), "Curating GitHub for engineered
+software projects" ([Reaper](https://doi.org/10.1007/s10664-017-9512-6)). The criteria below are what
+the code applies.
 
-**Stage 1 — License exclusion.** Repos with non-software licenses are excluded:
-`CC-BY-4.0`, `CC0-1.0`, `CC-BY-SA-4.0`, `OFL-1.1` (SIL Open Font License),
-and repos with no license at all.
-These are typically documentation sites, datasets, or font projects — not software.
+**Stage 1: license.** A repository is excluded if its SPDX license identifier is `CC-BY-4.0`, `CC0-1.0`,
+`CC-BY-SA-4.0` or `OFL-1.1` (SIL Open Font License), or if it has no license. A license GitHub reports as
+`NOASSERTION` is treated as no license. Every other identifier passes, including MIT, Apache-2.0,
+GPL-2.0, GPL-3.0, BSD-2-Clause, BSD-3-Clause, LGPL, MPL-2.0, ISC, AGPL-3.0 and the **Unlicense** (a
+public-domain dedication for software, so it counts as a software license).
 
-**Which licenses are kept?** All standard software licenses pass Stage 1, including
-MIT, Apache-2.0, GPL-2.0, GPL-3.0, BSD-2-Clause, BSD-3-Clause, LGPL, MPL-2.0,
-ISC, AGPL-3.0, and **Unlicense**. The Unlicense is a public domain dedication for
-software (equivalent to "no restrictions") and is treated as a valid software license.
-Its presence does not indicate a non-software repo — many legitimate, production-quality
-software projects use it.
+**Stage 2: hard thresholds.** A repository is excluded if it has **no releases** (the count of GitHub
+releases) or **fewer than 2 contributors**. A repository whose contributor count
+is unknown (`null`, because GitHub would not list that many) passes the contributor check. Archived
+repositories were already left out by the search query. Because discovery applies **Min Contributors**
+first, the effective contributor minimum is the larger of **Min Contributors** and 2.
 
-**Stage 2 — Hard thresholds.** Repos with zero releases or fewer than 2 contributors
-are excluded unconditionally.
+**Stage 3: pull-request and issue activity.** Among the repositories that passed Stages 1 and 2, SIEVE
+computes the first quartile (Q1, the 25th percentile with linear interpolation) of two counts:
 
-**Stage 3 — Population-level Q1 filter.** Across the discovered candidates that pass
-Stages 1 and 2, SIEVE computes the first quartile (Q1) for pull request count and issue
-count. Repos falling below Q1 on either are excluded. The LOC and code-ratio criteria are
-implemented in SIEVE's quality module but are not applied by the pipeline, because
-filtering runs before repositories are cloned.
+- the number of pull requests, of any state (open, closed or merged);
+- the number of issues, of any state, **excluding** pull requests (GitHub's issue list also contains pull
+  requests, so the pull-request count is subtracted, with a floor of 0).
 
-This filter is the most reliable way to avoid documentation repos, "awesome lists", dataset
-repos, and other non-software projects that can otherwise dominate high-star searches.
-It requires a **two-pass discovery** (collect all candidates first, compute population
-statistics, then filter), which is slower but produces a significantly higher-quality corpus.
+A repository is excluded if its pull-request count is below the Q1 of pull requests, or its issue count is
+below the Q1 of issues. The comparison is strict, so a repository exactly at Q1 stays. The quartiles
+are computed over this discovered pool only, which has already been cut by **Min Stars**, **Min
+Contributors** and **Max Repos**, not over all of GitHub. The filter therefore runs *after* the **Max Repos**
+cap and can leave fewer repositories than the cap. If no repository passes Stages 1 and 2, none passes
+the filter.
 
-**When to enable it:** Any time corpus quality matters more than speed. Strongly recommended
-for corpora intended for publication.
+**Lines-of-code and code-ratio criteria are not applied.** `apply_filters` also contains the Q1 of lines of
+code and a range for the ratio of code to comment lines, but the pipeline runs the filter before cloning,
+so it passes no clone and every repository has `loc` 0 and `code_ratio` 0. With all values equal to 0 these
+two checks exclude nothing. The `quality` block in `manifest.json` therefore shows `loc`, `comment_lines`
+and `code_ratio` as 0.
+
+**Data used.** Each candidate costs GitHub requests for its release, pull-request and issue counts. If
+GitHub returns an error other than a rate limit or bad credentials for these requests, the counts that
+were not fetched stay 0, and a repository with 0 releases fails Stage 2. If a rate limit stops the filter
+part-way, only the repositories checked so far are kept and the run summary reports `rate_limited`. `test_suite`
+detection is separate and is not used by this filter.
+
+This filter is the most reliable way to avoid documentation repositories, "awesome lists", dataset
+repositories and other non-software projects that can otherwise dominate high-star searches. It needs
+the whole candidate pool for the quartiles and three more GitHub requests per candidate, so it is slower.
 """)
 
 with st.expander("Why do documentation repos appear in high-star searches?"):
@@ -722,8 +846,8 @@ with st.expander("Why do documentation repos appear in high-star searches?"):
     Without the engineered filter, these repos will be discovered, cloned, and processed —
     yielding zero or near-zero extracted records while consuming API quota and clone time.
 
-    If you do not want to use the full engineered filter (it's slower due to the two-pass
-    discovery and per-repo metrics collection), a lighter alternative is to set a higher
+    If you do not want to use the full engineered filter (it's slower because of the per-repo
+    GitHub lookups it needs), a lighter alternative is to set a higher
     **Min Stars** threshold in combination with a meaningful **Min Contributors** count,
     then inspect the per-repo breakdown in the Dataset Statistics panel after a run.
     Repos with 0 extracted functions *and* 0 extracted classes are a reliable signal of
@@ -735,44 +859,58 @@ st.divider()
 # ─── Record Types ─────────────────────────────────────────────────────────────
 
 st.header("Record Schema")
+st.markdown("""
+Every record is one JSON object per line in JSONL, or one row in Parquet. The two tables below list
+every field of the function record (`FunctionRecord`) and the class record (`ClassRecord`) defined in
+`sieve/core/extraction.py`, in the order the fields are written. `X | null` means the field can be `null`.
+
+- **Function records** cover free functions and methods (`is_method` tells them apart). Constructors
+  are methods and are included.
+- **Class records** cover classes. The methods of a class also appear as their own function records.
+- `llm_score` and `llm_score_truncated` are `null` unless **Annotate LLM Score** is on and the record was
+  scored. `ast` is `null` unless **Export Full AST** is on. `commit_sha` is filled by the pipeline.
+- The AST fields and the 22 metrics are computed on the record's `source_code`, parsed as a standalone
+  snippet. If that parse fails they are `null`.
+- In Parquet, list fields (such as `parameters`) are stored as JSON strings. See **Output Files and Export**.
+""")
 
 tab_func, tab_class = st.tabs(["Function Record", "Class Record"])
 
 with tab_func:
     st.markdown("""
-    | Field | Type | Description |
-    |-------|------|-------------|
-    | `repo` | str | Full repo name, e.g. `owner/repo` |
-    | `file_path` | str | Path relative to repo root |
-    | `language` | str | Programming language |
-    | `func_name` | str | Function name |
-    | `parameters` | list[str] | Parameter list as strings (includes type annotations) |
-    | `return_annotation` | str \\| null | Return type annotation if present |
-    | `docstring` | str \\| null | Docstring content, stripped of delimiters |
-    | `source_code` | str | Full function source, indentation-normalized |
-    | `signature` | str | Function header + docstring + `pass` — no implementation |
-    | `used_imports` | list[str] | Import statements whose names appear in the function body |
-    | `start_line` | int | Start line in the original file |
-    | `end_line` | int | End line in the original file |
-    | `is_method` | bool | True if defined inside a class |
-    | `parent_class` | str \\| null | Enclosing class name if `is_method` is true |
-    | `decorators` | list[str] | Decorator/annotation strings (e.g. `@staticmethod`, `@Override`) |
-    | `commit_sha` | str \\| null | Git commit SHA at extraction time — use to build GitHub permalink |
-    | `llm_score` | float \\| null | P(LLM-generated) from the built-in CodeBERT classifier; null if scoring is off, failed, or the snippet is blank |
-    | `llm_score_truncated` | bool \\| null | True if the score reflects only the first 512 tokens of the snippet; null if not scored |
-    | `ast_depth` | int \\| null | Maximum depth of the parse tree (always exported) |
-    | `ast_num_nodes` | int \\| null | Total number of AST nodes |
-    | `ast_node_types` | dict \\| null | Node type → count mapping |
-    | `ast` | dict \\| null | Full AST as nested JSON (only when Export Full AST is enabled) |
-    | `loc` | int \\| null | Total lines of code |
-    | `sloc` | int \\| null | Source lines (non-blank, non-comment) |
-    | `lloc` | int \\| null | Logical lines of code (statements) |
-    | `comments` | int \\| null | Comment lines |
-    | `multi` | int \\| null | Multi-line string/comment lines |
+    | Field | Type | Meaning |
+    |-------|------|---------|
+    | `repo` | str | Repository full name, `owner/repo` |
+    | `file_path` | str | Path of the source file relative to the repository root |
+    | `language` | str | `Python`, `Java`, `JavaScript` or `C++` |
+    | `func_name` | str | Function or method name |
+    | `parameters` | list[str] | One string per parameter, as written in the source (Python: annotations and defaults included) |
+    | `return_annotation` | str \\| null | Return type as written, if there is one |
+    | `docstring` | str \\| null | Python: the docstring without its delimiters. Java, JavaScript, C++: the comment block directly before the definition. `null` if none (always `null` for JavaScript arrow functions) |
+    | `source_code` | str | Full source of the function, with indentation normalized |
+    | `signature` | str | Header plus docstring with the implementation left out (Python: header, docstring and `pass`) |
+    | `used_imports` | list[str] | Import statements of the file whose imported names appear in `source_code` (see **Import Detection**) |
+    | `start_line` | int | First line of the definition in the original file (1-based) |
+    | `end_line` | int | Last line of the definition in the original file (1-based) |
+    | `is_method` | bool | `true` if defined inside a class |
+    | `parent_class` | str \\| null | Name of the enclosing class when `is_method` is `true`, otherwise `null` |
+    | `decorators` | list[str] | Decorators or annotations written on the function (for example `@staticmethod`, `@Override`) |
+    | `llm_score` | float \\| null | P(AI-generated) from the built-in classifier, rounded to 4 decimals. `null` when scoring is off, failed, or the snippet is blank |
+    | `llm_score_truncated` | bool \\| null | `true` if the score reflects only the first 512 tokens of the snippet; `null` if the record was not scored |
+    | `ast_depth` | int \\| null | Depth of the deepest node of the snippet's parse tree (the root is depth 0). Always exported |
+    | `ast_num_nodes` | int \\| null | Number of nodes in the parse tree, anonymous tokens included. Always exported |
+    | `ast_node_types` | dict \\| null | Node type to count mapping. Always exported |
+    | `ast` | dict \\| null | Full parse tree as nested JSON, only with Export Full AST (see **AST Representation**); otherwise `null` |
+    | `commit_sha` | str \\| null | Commit that was cloned (`git rev-parse HEAD`), for building a GitHub permalink with `file_path` and `start_line`. `null` if it could not be read |
+    | `loc` | int \\| null | Total lines of the snippet |
+    | `sloc` | int \\| null | Non-blank lines that contain no comment (a line of code with a trailing comment is counted in `comments` instead) |
+    | `lloc` | int \\| null | Logical lines: number of statement nodes |
+    | `comments` | int \\| null | Single-line comment lines |
+    | `multi` | int \\| null | Lines spanned by multi-line comments |
     | `blank` | int \\| null | Blank lines |
-    | `comment_ratio` | float \\| null | Comment lines / LOC |
+    | `comment_ratio` | float \\| null | (`comments` + `multi`) / `loc`, rounded to 4 decimals |
     | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity |
-    | `max_nesting_depth` | int \\| null | Maximum control flow nesting depth |
+    | `max_nesting_depth` | int \\| null | Maximum nesting depth of control-flow structures |
     | `h1` | int \\| null | Halstead: distinct operators |
     | `h2` | int \\| null | Halstead: distinct operands |
     | `N1` | int \\| null | Halstead: total operators |
@@ -783,46 +921,46 @@ with tab_func:
     | `volume` | float \\| null | Halstead: volume |
     | `difficulty` | float \\| null | Halstead: difficulty |
     | `effort` | float \\| null | Halstead: effort |
-    | `time` | float \\| null | Halstead: estimated programming time (seconds) |
-    | `bugs` | float \\| null | Halstead: estimated number of bugs |
-    | `maintainability_index` | float \\| null | Maintainability Index (0–100) |
+    | `time` | float \\| null | Halstead: estimated programming time in seconds |
+    | `bugs` | float \\| null | Halstead: estimated number of delivered bugs |
+    | `maintainability_index` | float \\| null | Maintainability Index (see **Code Structure Metrics**) |
     """)
 
 with tab_class:
     st.markdown("""
-    | Field | Type | Description |
-    |-------|------|-------------|
-    | `repo` | str | Full repo name, e.g. `owner/repo` |
-    | `file_path` | str | Path relative to repo root |
-    | `language` | str | Programming language |
+    | Field | Type | Meaning |
+    |-------|------|---------|
+    | `repo` | str | Repository full name, `owner/repo` |
+    | `file_path` | str | Path of the source file relative to the repository root |
+    | `language` | str | `Python`, `Java`, `JavaScript` or `C++` |
     | `class_name` | str | Class name |
-    | `parent_classes` | list[str] | Base class names |
-    | `docstring` | str \\| null | Class-level docstring |
-    | `source_code` | str | Full class source, indentation-normalized |
-    | `skeleton` | str | Class signature + method signatures + docstrings + `pass` |
-    | `used_imports` | list[str] | Import statements whose names appear in the class body |
-    | `method_names` | list[str] | Names of all methods defined in the class |
-    | `method_count` | int | Number of methods |
-    | `has_constructor` | bool | True if a constructor is defined |
-    | `decorators` | list[str] | Decorator/annotation strings on the class |
-    | `start_line` | int | Start line in the original file |
-    | `end_line` | int | End line in the original file |
-    | `commit_sha` | str \\| null | Git commit SHA at extraction time — use to build GitHub permalink |
-    | `llm_score` | float \\| null | P(LLM-generated) from the built-in CodeBERT classifier; null if scoring is off, failed, or the snippet is blank |
-    | `llm_score_truncated` | bool \\| null | True if the score reflects only the first 512 tokens of the snippet; null if not scored |
-    | `ast_depth` | int \\| null | Maximum depth of the parse tree (always exported) |
-    | `ast_num_nodes` | int \\| null | Total number of AST nodes |
-    | `ast_node_types` | dict \\| null | Node type → count mapping |
-    | `ast` | dict \\| null | Full AST as nested JSON (only when Export Full AST is enabled) |
-    | `loc` | int \\| null | Total lines of code |
-    | `sloc` | int \\| null | Source lines (non-blank, non-comment) |
-    | `lloc` | int \\| null | Logical lines of code (statements) |
-    | `comments` | int \\| null | Comment lines |
-    | `multi` | int \\| null | Multi-line string/comment lines |
+    | `parent_classes` | list[str] | Names of the base classes / extended and implemented types (Python keyword arguments such as `metaclass=` are not included) |
+    | `docstring` | str \\| null | Python: the class docstring without delimiters. Java, JavaScript, C++: the comment block directly before the class. `null` if none |
+    | `source_code` | str | Full source of the class, with indentation normalized |
+    | `skeleton` | str | Class header plus the signatures and docstrings of its methods with implementations left out (Python: bodies replaced by `pass`) |
+    | `used_imports` | list[str] | Import statements of the file whose imported names appear in `source_code` (see **Import Detection**) |
+    | `method_names` | list[str] | Names of the methods defined directly in the class |
+    | `method_count` | int | Number of entries in `method_names` |
+    | `has_constructor` | bool | `true` if a constructor is defined (Python: `__init__`, or a `dataclass` decorator) |
+    | `decorators` | list[str] | Decorators or annotations written on the class |
+    | `start_line` | int | First line of the definition in the original file (1-based) |
+    | `end_line` | int | Last line of the definition in the original file (1-based) |
+    | `llm_score` | float \\| null | P(AI-generated) from the built-in classifier, rounded to 4 decimals. `null` when scoring is off, failed, or the snippet is blank |
+    | `llm_score_truncated` | bool \\| null | `true` if the score reflects only the first 512 tokens of the snippet; `null` if the record was not scored |
+    | `ast_depth` | int \\| null | Depth of the deepest node of the snippet's parse tree (the root is depth 0). Always exported |
+    | `ast_num_nodes` | int \\| null | Number of nodes in the parse tree, anonymous tokens included. Always exported |
+    | `ast_node_types` | dict \\| null | Node type to count mapping. Always exported |
+    | `ast` | dict \\| null | Full parse tree as nested JSON, only with Export Full AST (see **AST Representation**); otherwise `null` |
+    | `commit_sha` | str \\| null | Commit that was cloned (`git rev-parse HEAD`), for building a GitHub permalink with `file_path` and `start_line`. `null` if it could not be read |
+    | `loc` | int \\| null | Total lines of the snippet |
+    | `sloc` | int \\| null | Non-blank lines that contain no comment (a line of code with a trailing comment is counted in `comments` instead) |
+    | `lloc` | int \\| null | Logical lines: number of statement nodes |
+    | `comments` | int \\| null | Single-line comment lines |
+    | `multi` | int \\| null | Lines spanned by multi-line comments |
     | `blank` | int \\| null | Blank lines |
-    | `comment_ratio` | float \\| null | Comment lines / LOC |
+    | `comment_ratio` | float \\| null | (`comments` + `multi`) / `loc`, rounded to 4 decimals |
     | `cyclomatic_complexity` | int \\| null | McCabe cyclomatic complexity |
-    | `max_nesting_depth` | int \\| null | Maximum control flow nesting depth |
+    | `max_nesting_depth` | int \\| null | Maximum nesting depth of control-flow structures |
     | `h1` | int \\| null | Halstead: distinct operators |
     | `h2` | int \\| null | Halstead: distinct operands |
     | `N1` | int \\| null | Halstead: total operators |
@@ -833,9 +971,9 @@ with tab_class:
     | `volume` | float \\| null | Halstead: volume |
     | `difficulty` | float \\| null | Halstead: difficulty |
     | `effort` | float \\| null | Halstead: effort |
-    | `time` | float \\| null | Halstead: estimated programming time (seconds) |
-    | `bugs` | float \\| null | Halstead: estimated number of bugs |
-    | `maintainability_index` | float \\| null | Maintainability Index (0–100) |
+    | `time` | float \\| null | Halstead: estimated programming time in seconds |
+    | `bugs` | float \\| null | Halstead: estimated number of delivered bugs |
+    | `maintainability_index` | float \\| null | Maintainability Index (see **Code Structure Metrics**) |
     """)
 
 st.divider()
@@ -844,29 +982,34 @@ st.divider()
 
 st.header("Code Structure Metrics")
 st.markdown("""
-SIEVE computes **22 structural metrics** for every extracted record using its own
-tree-sitter-based metrics engine (`sieve.core.metrics`). All metrics are computed
-from isolated code snippets — no external tools required — and are consistent
-across all four supported languages.
+SIEVE computes **22 structural metrics** for every function and class record: 7 raw, 2 complexity,
+12 Halstead and 1 composite. They come from its own tree-sitter-based engine (`sieve.core.metrics`), so
+no external tool is needed, and the definitions are the same for all four languages. Each metric is
+computed on the record's own `source_code`, parsed as a standalone snippet, so it describes that
+snippet and not the file or repository around it. Fan-in and fan-out need a call graph of the whole
+repository and are not computed. If a snippet cannot be parsed, all 22 metrics are `null`.
+
+What counts as an operator, an operand, a branch, a comment or a statement is decided by per-language
+tables of tree-sitter node types in `sieve/core/metrics.py`.
 
 #### Raw Metrics
 
-| Metric | Description |
-|--------|-------------|
-| `loc` | Total lines of code |
-| `sloc` | Source lines (non-blank, non-comment) |
-| `lloc` | Logical lines of code — number of statement nodes |
-| `comments` | Number of single-line comment lines |
-| `multi` | Number of multi-line comment/docstring lines |
-| `blank` | Number of blank lines |
-| `comment_ratio` | Comment lines / LOC |
+| Metric | Definition |
+|--------|------------|
+| `loc` | Number of lines in the snippet |
+| `sloc` | Non-blank lines that contain no comment. A line of code with a trailing comment is counted in `comments`, not here. A Python docstring is a string, not a comment, so its lines count here |
+| `lloc` | Logical lines: the number of statement nodes (for example expression, return, throw, break, continue statements, and declarations or assignments, depending on the language) |
+| `comments` | Lines of comments that start and end on the same line |
+| `multi` | Lines covered by comments that span more than one line (block comments in Java, JavaScript and C++). Python has no multi-line comment node, so `multi` is 0 for Python |
+| `blank` | Lines that are empty or only whitespace |
+| `comment_ratio` | (`comments` + `multi`) / `loc`, rounded to 4 decimals; 0.0 when `loc` is 0 |
 
 #### Complexity Metrics
 
-| Metric | Description |
-|--------|-------------|
-| `cyclomatic_complexity` | McCabe complexity: 1 + number of decision points. Which constructs count depends on the language; see the table below. |
-| `max_nesting_depth` | Maximum depth of nested control flow structures (if, for, while, try, with) |
+| Metric | Definition |
+|--------|------------|
+| `cyclomatic_complexity` | McCabe complexity: 1 + the number of decision points. Which constructs count depends on the language; see the table below |
+| `max_nesting_depth` | The largest number of control-flow nodes on one path from the root, counting the node types listed below |
 
 **Decision points counted in `cyclomatic_complexity` (+1 each):**
 
@@ -886,34 +1029,100 @@ three languages: `else`, `default`, `switch`, `try`, `finally`, `return`,
 `instanceof`, `await`, `??`, `&&=`, `||=`, and all other binary operators.
 Python `match` / `case` is not counted.
 
+**Node types counted in `max_nesting_depth` (+1 per level):**
+
+| Language | Counted |
+|----------|---------|
+| Python | `if`, `for`, `while`, `with`, `try`, `except`, `match` |
+| Java | `if`, `for`, `while`, `do`, `try`, `catch`, `switch` (the for-each loop is not counted) |
+| JavaScript | `if`, `for`, `for-in` / `for-of`, `while`, `do`, `try`, `catch`, `switch` |
+| C++ | `if`, `for`, `while`, `do`, `try`, `catch`, `switch` (the range-based `for` is not counted) |
+
+In Java, JavaScript and C++ an `else if` is an `if` nested inside the `else`, so a chain of `else if`
+branches deepens the nesting by one level per branch. Python `elif` is not counted, so the same chain
+has depth 1.
+
 #### Halstead Metrics
 
-Halstead metrics are derived from the count of distinct and total operators
-and operands in the source code.
+Halstead metrics are derived from the operators and operands found in the syntax tree. Operator and
+operand node types are listed per language in `sieve/core/metrics.py`; operands are identifiers and
+literals (and type names in Java and C++). With `h1`, `h2`, `N1`, `N2` as below:
 
-| Metric | Description |
-|--------|-------------|
+| Metric | Definition |
+|--------|------------|
 | `h1` | Distinct operators |
 | `h2` | Distinct operands |
 | `N1` | Total operator occurrences |
 | `N2` | Total operand occurrences |
 | `vocabulary` | h1 + h2 |
 | `halstead_length` | N1 + N2 |
-| `calculated_length` | h1·log₂(h1) + h2·log₂(h2) |
-| `volume` | (N1+N2)·log₂(h1+h2) — information content in bits |
-| `difficulty` | (h1/2)·(N2/h2) — difficulty to understand |
+| `calculated_length` | h1·log₂(h1) + h2·log₂(h2) (a term is 0 when its count is 0) |
+| `volume` | (N1 + N2)·log₂(h1 + h2); 0 when the vocabulary is 1 or less |
+| `difficulty` | (h1 / 2)·(N2 / h2); 0 when h2 is 0 |
 | `effort` | difficulty × volume |
-| `time` | effort / 18 — estimated programming time in seconds |
-| `bugs` | volume / 3000 — estimated number of delivered bugs |
+| `time` | effort / 18, in seconds |
+| `bugs` | volume / 3000 |
+
+The count metrics are integers. `calculated_length`, `volume`, `difficulty`, `effort` and `time` are
+rounded to 2 decimals and `bugs` to 4.
 
 #### Composite Metric
 
-| Metric | Description |
-|--------|-------------|
-| `maintainability_index` | Score from 0 to 100 — higher is more maintainable. Derived from Halstead volume, cyclomatic complexity, and SLOC using the Radon/SEI formula. |
+| Metric | Definition |
+|--------|------------|
+| `maintainability_index` | MI = max(0, 100 · (171 − 5.2·ln(V) − 0.23·G − 16.2·ln(L) + 50·sin(√(2.4·C))) / 171), rounded to 2 decimals. V is the Halstead `volume`, G is `cyclomatic_complexity`, L is `sloc` and C is `comment_ratio` as a fraction. It is 100.0 when `sloc` or `volume` is 0 |
 
-All metrics are computed entirely from the tree-sitter AST — no lizard, radon,
-or other external tools are required at runtime.
+The formula has the form of the Radon variant of the Maintainability Index, scaled to 100. Its comment term
+uses `comment_ratio` as a fraction between 0 and 1, and `comment_ratio` includes multi-line comment lines, so
+values need not match those of other tools. The result is floored at 0 but not capped above, so a very
+small snippet with a high comment ratio can score above 100. Higher means easier to maintain *by this
+formula*.
+
+These are structural proxies. They describe the shape and size of a snippet; on their own they do not
+measure how hard the code is to understand or how good it is.
+""")
+
+st.divider()
+
+# ─── AST representation ───────────────────────────────────────────────────────
+
+st.header("AST Representation")
+st.markdown("""
+SIEVE parses each record's `source_code` as a standalone snippet with the tree-sitter grammar of the
+selected language. Two things come from that parse.
+
+**Summary fields, always exported.** These three are in every record, whatever the settings:
+
+| Field | Content |
+|-------|---------|
+| `ast_depth` | Depth of the deepest node. The root node has depth 0 |
+| `ast_num_nodes` | Number of nodes in the tree. Anonymous nodes (keywords and punctuation such as `def` or `(`) are counted |
+| `ast_node_types` | Dictionary from node type to the number of nodes of that type |
+
+**Full AST, opt-in.** Only when **Export Full AST** is on (CLI `--export-ast`, config `export_ast`, web
+UI toggle; default off) is the whole tree written to the record's `ast` field. Otherwise `ast` is `null`.
+Each node is an object with three keys:
+
+| Key | Content |
+|-----|---------|
+| `type` | The tree-sitter node type, for example `function_definition` |
+| `text` | For a leaf node (a node without children): its source text. Text longer than 80 characters is cut to its first 77 characters followed by `...`. `null` for every node that has children |
+| `children` | List of child nodes in source order; empty for a leaf |
+
+```json
+{"type": "module", "text": null, "children": [
+  {"type": "function_definition", "text": null, "children": [
+    {"type": "def", "text": "def", "children": []},
+    {"type": "identifier", "text": "add", "children": []}
+  ]}
+]}
+```
+
+The example is shortened; a real tree continues with the parameters, the colon and the body. There is no
+practical depth limit (the converter allows 999 levels). The root type depends on the grammar
+(`module` for Python, `program` for Java and JavaScript, `translation_unit` for C++). The full AST makes
+files much larger, which is why it is off by default. If parsing raises an error, all four AST fields are
+`null`.
 """)
 
 st.divider()
@@ -946,32 +1155,36 @@ st.divider()
 
 # ─── Output Files ─────────────────────────────────────────────────────────────
 
-st.header("Output Files")
+st.header("Output Files and Export")
 st.markdown("""
 Output is written to the CLI's `--output-dir` (config key `output_dir`, default `./sieve_output`).
-The web UI writes to a temporary directory and offers the files as downloads. Files produced:
+The web UI writes to a temporary directory and offers the files as downloads.
 
-| File | Description |
-|------|-------------|
-| `functions.jsonl` | One JSON object per line, one per function record |
-| `classes.jsonl` | One JSON object per line, one per class record |
-| `functions.parquet` | Columnar format — list fields serialized as JSON strings |
-| `classes.parquet` | Columnar format — list fields serialized as JSON strings |
-| `manifest.json` | Run metadata, described below |
+**Formats.** **Export Format** (CLI `--export-format`, config `export_format`) is `jsonl` (default),
+`parquet` or `both`.
 
-JSONL and Parquet are written based on the **Export Format** setting. A data file is written only when
-it has records. The manifest is always written.
+**Files per granularity.** Functions and classes are written to separate files. A data file is written only
+when it has at least one record, so a function-only run produces no `classes.*` file. The manifest is
+always written.
 
-**`manifest.json`** contains:
+| File | Written when | Content |
+|------|--------------|---------|
+| `functions.jsonl` | format is `jsonl` or `both`, and there are function records | One JSON object per line, one per function record, UTF-8 (non-ASCII text is written as is), keys in the order of the **Record Schema** tables |
+| `classes.jsonl` | format is `jsonl` or `both`, and there are class records | The same, for class records |
+| `functions.parquet` | format is `parquet` or `both`, and there are function records | Columnar, written with `polars` |
+| `classes.parquet` | format is `parquet` or `both`, and there are class records | The same, for class records |
+| `manifest.json` | always | Run metadata, described below |
 
-| Key | Content |
-|-----|---------|
-| `sieve_version`, `generated_at` | SIEVE version and the UTC time the manifest was written |
-| `config` | The run's settings. **Tokens are never included.** |
-| `summary` | `total_repos`, `total_functions`, `total_classes`, `total_llm_scored` (records that received an `llm_score`) and `total_llm_score_truncated` (those scored on only their first 512 tokens) |
-| `repos` | One entry per processed repository: stars, contributors (`null` if GitHub would not count them), last commit date, default branch, license, topics, `collected_at`, `test_suite`, `dependencies`, `extraction_files_skipped`, and `quality` when the engineered filter ran |
-| `discovery` | What the repository search covered; see **Repository Discovery** |
-| `extraction` | The skipped directory names and the number of files skipped; see **What Extraction Skips** |
+**JSONL vs Parquet.** The two hold the same fields. In Parquet, list-valued fields (`parameters`,
+`used_imports`, `decorators`, `method_names`, `parent_classes`) are stored as JSON strings, so decode them
+with `json.loads`. The dictionary fields `ast_node_types` and `ast` become nested struct columns whose
+fields are inferred from the first records written, so a node type that first appears later in the file
+can be missing from the Parquet column. JSONL always holds the complete dictionaries. If you need every
+node type or the full tree, use JSONL.
+
+**Web UI bundle.** After a run the **Download Corpus** panel shows one button per file that was written and
+a **Download All (ZIP)** button. The ZIP is named `sieve_corpus.zip` and contains every one of those files,
+including `manifest.json`, at the top level without folders.
 
 Each record's `commit_sha` is the commit that was cloned (`null` if it could not be read).
 
@@ -989,6 +1202,149 @@ Or with pandas / polars:
 import pandas as pd
 df = pd.read_json("sieve_output/functions.jsonl", lines=True)
 ```
+""")
+
+st.subheader("manifest.json Layout")
+st.markdown("""
+`manifest.json` is one JSON object with seven top-level keys, written in this order. It never contains a
+token.
+
+```json
+{
+  "sieve_version": "...",
+  "generated_at": "...",
+  "config": {},
+  "summary": {},
+  "repos": [],
+  "discovery": {},
+  "extraction": {}
+}
+```
+
+The tables list every field. "Null?" says whether the value can be `null`; "no" means the key is always
+present with a value of the stated type (a list or count can be empty or 0).
+
+**Top level**
+
+| Key | Type | Null? | Content |
+|-----|------|-------|---------|
+| `sieve_version` | str | no | Version of SIEVE that wrote the file |
+| `generated_at` | str | no | UTC time the manifest was written, ISO 8601 |
+| `config` | object | no | The run's settings, below |
+| `summary` | object | no | Totals, below |
+| `repos` | list | no | One entry per processed repository, below |
+| `discovery` | object | no | What the repository search covered, below. The pipeline always writes it |
+| `extraction` | object | no | What extraction skipped, below. The pipeline always writes it |
+
+**`config`** holds the `SIEVEConfig` fields except `github_token` and `hf_token`:
+
+| Key | Type | Null? |
+|-----|------|-------|
+| `language` | str | no |
+| `start_date`, `end_date` | str (`YYYY-MM-DD`) | no |
+| `min_stars`, `min_contributors` | int | no |
+| `max_repos`, `max_functions`, `max_classes` | int | **yes** (`null` = no cap) |
+| `granularity` | list[str] (`function`, `class`) | no |
+| `engineered_only`, `annotate_llm_score`, `export_ast`, `deduplicate`, `wait_for_rate_limit` | bool | no |
+| `dedup_threshold` | float | no |
+| `output_dir` | str | no |
+| `export_format` | str (`jsonl`, `parquet`, `both`) | no |
+
+**`summary`**
+
+| Key | Type | Null? | Content |
+|-----|------|-------|---------|
+| `total_repos` | int | no | Number of entries in `repos` |
+| `total_functions`, `total_classes` | int | no | Records written |
+| `total_llm_scored` | int | no | Records that received an `llm_score` (0 if scoring was off or failed) |
+| `total_llm_score_truncated` | int | no | Of those, records scored on only their first 512 tokens |
+
+**Each entry of `repos`** (repository metadata at collection time):
+
+| Key | Type | Null? | Content |
+|-----|------|-------|---------|
+| `full_name` | str | no | `owner/repo` |
+| `url` | str | no | The repository's GitHub page |
+| `stars` | int | no | Star count when discovered |
+| `contributors` | int | **yes** | Exact contributor count without bots; `null` when GitHub would not list them (too many) |
+| `last_commit_date` | str | no | ISO 8601 time of the latest commit. If that lookup fails it falls back to the repository's last push time, and to the text `unknown` if there is none |
+| `default_branch` | str | no | The branch that was cloned |
+| `license_spdx` | str | **yes** | SPDX identifier of the license; `null` if GitHub reports none (GitHub may also report `NOASSERTION`) |
+| `language` | str | no | The language of the run |
+| `collected_at` | str | no | UTC time the metadata was collected, ISO 8601 |
+| `topics` | list[str] | no | GitHub topics (may be empty) |
+| `test_suite` | object | no | Result of the test-suite heuristic: `test_suite_present` (bool), `confidence` (`high`, `medium`, `low` or `none`), `has_test_directory`, `has_test_files`, `has_test_config`, `has_ci_test_invocation` (bool each), `test_file_count` (int), `test_directories_found` and `test_config_files_found` (lists of str). See **How Test Suite Detection Works** |
+| `dependencies` | list[object] | no | Direct dependencies, each `{name: str, version: str or null, kind: str}`; see **Dependency Graph** |
+| `extraction_files_skipped` | int | no | Source files of the language inside skipped directories |
+| `quality` | object | only present when **Engineered Projects Only** ran | `pull_request_count`, `issue_count`, `release_count`, `loc`, `comment_lines`, `code_ratio` and `passes_engineered_filter`. `loc`, `comment_lines` and `code_ratio` are 0 in the pipeline and `passes_engineered_filter` is always `true`, because only repositories that passed are processed |
+
+**`discovery`** (fields explained under **Repository Discovery**; none is `null`):
+`complete` (bool), `total_matching` (int), `slices` (int), `truncated_windows` (list of
+`{start, end, total_count}`), `incomplete_results` (bool), `excluded` (list of `{repo, reason}`),
+`contributors_unknown` (list[str]) and `rate_limit_waits` (`{count: int, seconds: number}`).
+
+**`extraction`**: `skip_dirs` (list[str], sorted) and `files_skipped` (int, summed over all processed
+repositories).
+
+Repositories that fail to clone or process are not listed in `repos`. They appear in the run summary that
+the CLI and web UI show (`failed_repos`), and repositories dropped during discovery are in
+`discovery.excluded`.
+""")
+
+st.divider()
+
+# ─── AI-generated-code score ──────────────────────────────────────────────────
+
+st.header("AI-Generated-Code Score")
+st.markdown("""
+`llm_score` is the probability that a snippet is AI-generated, from a CodeBERT classifier that SIEVE
+loads itself. It is computed only when **Annotate LLM Score** is on (CLI `--annotate-llm-score`, config
+`annotate_llm_score`; default off). The page **About the Classifier** describes the training data and
+reports the evaluation; this section describes how scoring runs and how to read the result.
+
+**How scoring runs.**
+
+- It is the last step before export (Phase 5 of `run_pipeline`), after deduplication and the final cap, so
+  only records that are exported are scored. It scores the `source_code` of every function and class record.
+- Each snippet is tokenized with the `microsoft/codebert-base` tokenizer. The model reads at most **512
+  tokens**, counting the start and end tokens. A longer snippet is scored on its first 511 tokens plus the
+  end token, and its `llm_score_truncated` is `true`.
+- Snippets are sorted by token length (longest first) and scored in batches of up to **64**. Each batch is
+  padded only to its own longest member. The model reads only the first position's hidden state and
+  padding is masked, so this changes speed and not the scores. Results come back in the original order.
+- The device is chosen automatically: CUDA if available, then Apple MPS, then CPU.
+- A blank snippet gets `llm_score` and `llm_score_truncated` of `null`. Scores are rounded to 4 decimals.
+- **Failure handling.** If the classifier cannot be loaded or scoring raises an error (for example PyTorch
+  or Transformers is not installed, the weights cannot be downloaded, or memory runs out), the error is
+  reported through the progress callback and the run continues. Scores are assigned only after every batch
+  has finished, so a failed step leaves all `llm_score` values `null`; it never leaves some records scored.
+  The manifest then shows `total_llm_scored` of 0.
+
+**Where the weights come from.** The weights (`best_model.pt`) are hosted on the Hugging Face Hub in the
+repository
+[`mrahman2025/sieve-llm-classifier`](https://huggingface.co/mrahman2025/sieve-llm-classifier)
+(`HF_REPO_ID` in `sieve/models/classifier.py`). They are downloaded on first use with `huggingface_hub`
+and cached. If a file `src/sieve/models/artifacts/best_model.pt` exists, it is used instead of
+downloading. The tokenizer and the encoder architecture come from
+[`microsoft/codebert-base`](https://huggingface.co/microsoft/codebert-base). A Hugging Face token is
+optional (config `hf_token`, or the `HF_TOKEN` environment variable in the CLI).
+
+**Interpretation and limits.**
+
+- `llm_score` is a **probabilistic signal, not evidence of authorship**. A high score means the snippet
+  resembles the AI-generated examples the classifier was trained on. It does not show that a model wrote
+  the code, and a low score does not show that a person did.
+- The classifier was **trained on code from nine LLMs** (and on human code from repositories created after
+  January 2024).
+- It was **evaluated on a held-out set drawn from the same dataset** by a random split, stratified by
+  language, granularity and label. The AI-generated examples in that set therefore come from the same
+  generators as those in the training data. The evaluation does not show how the score behaves on code from
+  LLMs that were not in the training data, such as newer models, and the About page notes that accuracy may
+  drop for them.
+- Length matters. Only the first 512 tokens of a long snippet are read, and very short snippets can get
+  unreliable scores.
+- Use the score to screen, stratify or compare groups of records, and report it as an estimate with these
+  limits.
 """)
 
 st.divider()
@@ -1136,8 +1492,10 @@ with st.expander("What is the LLM Score field?"):
     **Blank snippets and failures.** A blank snippet gets `llm_score` null. If the classifier cannot be
     loaded or fails, the run continues and the scores stay null.
 
-    See the **About the Classifier** page for full details on training data, architecture,
-    and performance metrics (F1=0.9478, AUROC=0.9902 on a held-out test set of 11,419
+    `llm_score` is a probabilistic signal, not evidence of authorship, and the held-out evaluation does
+    not cover LLMs outside the training data. See **AI-Generated-Code Score** above for how scoring runs
+    and its limits, and the **About the Classifier** page for the training data, architecture, and
+    performance metrics (F1=0.9478, AUROC=0.9902 on a held-out test set of 11,419
     samples across Python, Java, JavaScript, and C++).
     """)
 
@@ -1160,21 +1518,46 @@ dependencies parsed from the repository's manifest files, colored by kind:
 The center node (red) represents the repository itself. Drag nodes to explore
 the graph; use scroll to zoom.
 
-**Supported manifest formats:**
-
-| Language | Files Parsed |
-|---|---|
-| Python | `requirements*.txt`, `requirements/*.txt`, `pyproject.toml` (PEP 508 + Poetry), `setup.cfg` |
-| JavaScript | `package.json` — `dependencies`, `devDependencies`, `peerDependencies` |
-| Java | `pom.xml` (Maven) — `<dependency>` blocks, scope-aware |
-| C++ | `conanfile.txt` (Conan `[requires]`), `vcpkg.json`, `CMakeLists.txt` (`find_package`) |
-
-Only **direct** dependencies are shown — transitive dependencies require
-network access to package registries and are not computed.
-
 Dependencies are stored in the corpus `manifest.json` under each repo's
 `dependencies` key, so they can be used for downstream analysis even without
 the UI.
+""")
+
+st.subheader("Dependency Extraction")
+st.markdown("""
+Dependencies are read from the manifest files of the **selected language only**, in the cloned
+repository, by `sieve/core/dependencies.py`. Nothing is installed or resolved and no package registry is
+contacted. Files are looked for in the repository root unless noted.
+
+**What is stored.** A list of `{name, version, kind}` per repository: `name` (str), `version` (the
+constraint exactly as written, or `null`) and `kind` (`main`, `dev` or `optional`). Entries follow the
+order in which the files are read. If two files list the same package, it appears twice.
+
+| Language | Files read | How they are parsed | Kind |
+|---|---|---|---|
+| Python | `requirements*.txt` and `requirements/*.txt` | Line by line with a regular expression. Blank lines, comments and lines starting with `-` (such as `-r other.txt`, `-e .` and index options) are skipped. A trailing comment and `[extras]` are cut. `name` is the leading name; `version` is the operator-and-number text that follows (for example `>=2.0,<3`) | `main` for every line, whatever the file is called (`requirements-dev.txt` included) |
+| Python | `pyproject.toml` | Parsed as TOML. `[project].dependencies`; every group of `[project.optional-dependencies]`; `[tool.poetry.dependencies]` (the `python` entry is skipped) and `[tool.poetry.dev-dependencies]`, where the version is the string or the `version` key of a table. If the TOML cannot be parsed, a fallback reads only the `dependencies = [...]` list | `main`, `optional`, `main`, `dev` respectively |
+| Python | `setup.cfg` | The lines under `install_requires` | `main` |
+| JavaScript | `package.json` | JSON. `dependencies`, `devDependencies`, `peerDependencies`; the version is the range string from the file | `main`, `dev`, `optional` |
+| Java | `pom.xml` in the root, or if there is none, the first `*/pom.xml` one directory down | A regular expression over every `<dependency>` block (not an XML parser, so blocks under `dependencyManagement` or inside plugins are read too). `name` is `groupId:artifactId`; `version` is the `<version>` text as written (it may be a `${property}` placeholder) or `null` when absent | `dev` if the scope is `test` or `provided`, otherwise `main` |
+| C++ | `conanfile.txt` | Lines of the `[requires]` section of the form `name/version` | `main` |
+| C++ | `vcpkg.json` | JSON `dependencies`: a string, or an object with `name` and `version-semver` or `version` | `main` |
+| C++ | `CMakeLists.txt` | `find_package(Name ...)` calls, case-insensitive. `CMake`, `Threads` and `PkgConfig` are ignored; `version` is `null` | `main` |
+
+**Not handled.**
+
+- Transitive dependencies, lock files and version resolution: the constraint is stored as written.
+- Other manifests: `setup.py`, `Pipfile`, `environment.yml`, Gradle or Ant builds, `conanfile.py` (the
+  module's docstring names it, but it is not read), Conan sections other than `[requires]`, `optionalDependencies`
+  in `package.json`, Poetry dependency groups (`[tool.poetry.group.*]`), `[dependency-groups]` and
+  `[build-system].requires` in `pyproject.toml`.
+- Manifests in subdirectories, for example the packages of a monorepo (the one-level `pom.xml` search is the
+  only exception).
+- Requirement lines that are URLs or VCS references and environment markers. For example, a line starting
+  `git+https://` is stored under the name `git`, and a marker such as `; python_version < "3.9"` is
+  dropped, not recorded.
+- A file that cannot be read or parsed is skipped without a message; `dependencies` is `[]` when no
+  supported file is found.
 """)
 
 st.divider()
@@ -1258,6 +1641,176 @@ used by the **Engineered Projects** filter.
 
 st.divider()
 
+# ─── Architecture ─────────────────────────────────────────────────────────────
+
+st.header("Architecture Overview")
+st.markdown("""
+**One input.** The CLI, the web UI and the Python API all build one `SIEVEConfig`
+(`sieve/config.py`), a pydantic model. It validates the settings (for example caps are `null` or at least
+1, `end_date` is not before `start_date`, at least one granularity), rejects unknown keys, supplies the
+defaults and keeps the two tokens out of every dump.
+
+**One entry point.** `run_pipeline(config, progress_callback=None)` in `sieve/pipeline.py` is a facade
+over the stages and returns a summary dictionary (counts, `output_paths`, `failed_repos`, per-repository
+metadata and a `rate_limited` flag). The CLI and the web UI call nothing else. Each stage is also a
+module you can import on its own:
+
+| Stage | Module |
+|-------|--------|
+| Discovery | `sieve/core/discovery.py` (`discover_repos`), with `sieve/core/github_limits.py` for rate limits |
+| Engineered filter | `sieve/core/quality.py` |
+| Extraction | `sieve/core/extraction.py`, with `metrics.py`, `dependencies.py` and `detection.py` |
+| Deduplication | `sieve/core/deduplication.py` |
+| Annotation | `sieve/models/classifier.py` |
+| Export | `sieve/core/export.py` |
+
+**Order of the stages.**
+
+```
+SIEVEConfig
+   ↓
+run_pipeline:  quota check → discovery → [engineered filter]
+               → Pass 1 count → Pass 2 extract → Pass 3 refill
+               → [deduplication] → final cap → [LLM score] → export
+```
+
+Steps in brackets run only when their setting is on. Pass 1 runs only when **Max Functions** or **Max
+Classes** is set. Discovery is a generator, but the pipeline reads it to the end before extraction starts,
+so the full repository list is known before the first clone.
+
+**Progress callback.** `progress_callback(message, current, total)` is called with each progress line.
+`current` and `total` are 0 for lines that are not part of a counted loop. The CLI prints the lines and
+the web UI streams them into a status box and keeps them as a log. The same lines go to the Python logger.
+
+**Two-pass extraction with per-repository allocation.**
+
+1. *Pass 1* clones each repository and counts its extractable functions and classes, with the same file
+   selection and the same walk that extraction uses (no records are built).
+2. The caps are split across repositories: every repository with at least one record gets one slot, and
+   the rest are shared in proportion to the records beyond the first (largest-remainder method; see
+   **Corpus Size Caps & Stratified Sampling**).
+3. *Pass 2* clones again and extracts each repository with a per-repository limit larger than its
+   allocation: the smaller of twice the allocation and the allocation plus 50. The first `allocation`
+   records are kept and the extra ones are held in memory as a **surplus buffer**.
+4. *Pass 3* fills any **shortfall** (kept records fewer than the cap). It takes records from the surplus
+   buffers in repository order and then, if still short, clones again the repositories that have records
+   left, those with the most remaining records first, skipping repositories that returned nothing despite
+   an allocation. Records are matched by repository, file path and start line so none is added twice.
+
+Without caps there is no Pass 1 and no allocation: every record is extracted in a single pass.
+
+**How failures are isolated.**
+
+- *A repository.* A failed or timed-out clone (300 seconds), or an unexpected error while processing it,
+  drops that repository only. It is listed in `failed_repos` (and counted in `total_repos_failed`) and the
+  run continues. During Pass 1 and Pass 3 such a repository is skipped silently.
+- *A file.* A file that cannot be read, that hits the recursion limit, or that raises while its records
+  are built is logged as a warning and skipped. It is not counted in the summary or the manifest.
+- *Small parts of a repository.* A failure to read the commit gives `commit_sha` of `null`; a manifest that
+  cannot be parsed gives no dependencies for that file.
+- *GitHub limits and errors.* A rate limit that stops discovery or the engineered filter after some
+  repositories were found lets the run continue with those and sets `rate_limited`; with none found it
+  ends with an error. A repository whose contributors cannot be fetched is skipped and recorded in
+  `discovery.excluded`.
+- *Annotation.* A failure to load or run the classifier is reported and the run continues without scores.
+- *Not isolated.* Invalid settings, a rejected GitHub token, an exhausted quota before discovery starts,
+  and a failure while writing the output end the run with an error.
+
+Repositories are processed one after another.
+""")
+
+st.divider()
+
+# ─── Extending SIEVE ──────────────────────────────────────────────────────────
+
+st.header("Extending SIEVE")
+st.markdown("""
+SIEVE has no plug-in registry. Languages, export formats and the classifier are all selected by code
+inside the package, so extending it means editing the source. What each change touches:
+
+#### Adding a language
+
+| Part | Where | What to do |
+|------|-------|------------|
+| Name | `Language` enum in `sieve/config.py` | Add a member. The web UI's language list is built from this enum, and the config and CLI validate against it |
+| File extensions | `LANGUAGE_EXTENSIONS` in `sieve/core/extraction.py` | Add the set of extensions to read |
+| Grammar | `pyproject.toml` and `requirements.txt`; `_get_parser` in `extraction.py`; `_get_tree` in `sieve/core/metrics.py` | Add the tree-sitter grammar package and import it in **both** loaders. The sample viewer's tree builder, `build_ast_json` in `sieve/ui/ast_viz.py`, has a third copy |
+| Definitions | `_WALKS` in `extraction.py` | Add a walk that decides which nodes are functions and classes. Pass 1 counting and Pass 2 extraction both use it |
+| Records | `extraction.py` | Write an extractor that turns each definition into a `FunctionRecord` or `ClassRecord` (parameters, docstring, signature or skeleton, imports), and add its branch in `extract_from_file` |
+| Metrics | `sieve/core/metrics.py` | Add the language to the node-type tables: `_OPERATORS`, `_OPERAND_TYPES`, `_BRANCH_NODES`, `_BRANCH_OPERATORS` and `_CASE_LABEL_NODES` (where the grammar uses a shared binary-expression node or case-label node), `_CONTROL_NODES`, `_COMMENT_TYPES`, and the statement types inside `_raw_metrics`. Without a grammar branch in `_get_tree` the metrics are all `null` |
+| Dependencies | `parse_dependencies` in `sieve/core/dependencies.py` | Add a parser for the language's manifest files; otherwise `dependencies` is empty |
+| Test-suite signal | tables in `sieve/core/detection.py` | Add file-name patterns, source extensions and runner config files; otherwise the language has no test patterns |
+| Search | `LANGUAGE_QUERY_MAP` in `sieve/core/discovery.py` | Needed only if GitHub's name for the language is not its lowercased name |
+
+The file-name rule for test files in `extraction.py` and the skipped-directory lists are shared by all
+languages and may need new entries.
+
+#### Adding an export format
+
+- Add a member to `ExportFormat` in `sieve/config.py`. The CLI and the config validate against it.
+- In `export_dataset` (`sieve/core/export.py`), add a branch for the format and a writer function that
+  takes the record list and an output path, and add the new files to the returned `output_paths`. The
+  manifest is written separately and needs no change.
+- The web UI's **Export Format** list is built from the enum but its labels come from a fixed dictionary
+  in `sieve/ui/Home.py`, which needs an entry for the new value. The download buttons and the ZIP bundle
+  pick up every file in `output_paths` on their own.
+
+#### Replacing the classifier
+
+The pipeline uses the classifier through two calls (Phase 5 of `run_pipeline`):
+
+- `LLMCodeClassifier.load(model_dir=<path>, hf_token=<token or None>)` returns the loaded object.
+- `clf.score_batch_detailed(snippets, batch_size=64)` takes a list of `str` and returns a list of the
+  same length and order. Each entry is `None` (the snippet was blank, so no score) or an object with
+  `.score` (float in [0, 1]) and `.truncated` (bool). `ScoreResult` in `sieve/models/classifier.py` is
+  such an object.
+
+The class also offers `score` and `score_batch`, which the pipeline does not use.
+
+**Not yet pluggable.** `run_pipeline` imports `LLMCodeClassifier` directly, and no setting selects another
+classifier, so a replacement class means editing that import in `sieve/pipeline.py`. Two lighter changes
+need no code change: new weights with the same architecture (a CodeBERT encoder, a dropout and one linear
+output on the first-position state) can be placed at `src/sieve/models/artifacts/best_model.pt`, which is
+used before the Hugging Face download; and `HF_REPO_ID` in `classifier.py` names the Hub repository. The
+tokenizer is always `microsoft/codebert-base`. Likewise, there is no way to add a language, an export
+format or a dependency parser without editing the modules listed above.
+""")
+
+st.divider()
+
+# ─── Deployment and CI ────────────────────────────────────────────────────────
+
+st.header("Deployment and CI")
+st.markdown("""
+**Docker image.** The `Dockerfile` in the repository root builds the image that the hosted Space runs:
+
+- Base image `python:3.11-slim`; the system packages `git`, `curl` and `cloc` are installed with `apt`.
+- The repository is copied in and `pip install -r requirements.txt` installs SIEVE (the file starts with
+  `-e .`) and its dependencies, including PyTorch and Transformers.
+- A user with id 1000 is created, as Hugging Face Spaces requires, with a writable Hugging Face cache and
+  a writable `src/sieve/models/artifacts` directory.
+- The environment sets the Streamlit port to 7860, address `0.0.0.0`, headless mode and no usage
+  statistics. The command is `streamlit run src/sieve/ui/Home.py --server.port=7860 --server.address=0.0.0.0`.
+- The classifier weights are **not** part of the image. They are downloaded on first use from the Hugging
+  Face Hub repository `mrahman2025/sieve-llm-classifier` into the cache (see **AI-Generated-Code Score**).
+
+The front matter of `README.md` declares `sdk: docker` and `app_port: 7860` for the Space.
+
+**Deployment to the Space.** The workflow `.github/workflows/sync_to_hf.yml` runs when a GitHub release is
+**published** or when it is started **manually** (workflow dispatch). It checks out the full history and
+force-pushes `HEAD` to the `main` branch of the Space repository `mrahman2025/sieve` on Hugging Face,
+using the `HF_TOKEN` secret. The workflow has no test step and does not wait for the CI workflow.
+
+**Continuous integration.** The workflow `.github/workflows/ci.yml` runs on pushes to `main` and `dev`,
+on pull requests to `main`, and on manual dispatch. It runs on Ubuntu with Python 3.11 and 3.12:
+
+1. install `requirements-dev.txt`, then `pip install -e .`;
+2. run `pytest` with coverage reporting;
+3. upload the coverage report to Codecov (a failed upload does not fail the job).
+""")
+
+st.divider()
+
 # ─── Known limitations ───────────────────────────────────────────────────────
 
 st.header("Known Limitations")
@@ -1295,6 +1848,23 @@ with caps set, versions whose counts or discovery differ can allocate the caps d
 are slow. The public Space has 8 GB of RAM; run large corpora locally.
 
 **C++ is slower.** See **C++ Parsing Performance**.
+
+**Deduplication is approximate and literal.** It compares token sets with MinHash, keeps identifiers and
+comments as written and ignores numbers, so it finds near-copies, not renamed or reworded code. See
+**Deduplication**.
+
+**Parquet dictionary columns.** `ast_node_types` and `ast` are written as struct columns inferred from the
+first records, so a node type first seen later can be missing from the Parquet file. JSONL has the full
+dictionaries. See **Output Files and Export**.
+
+**Failed repositories are not in the manifest.** A repository that fails to clone or process appears in the
+run summary (`failed_repos`) but not in `manifest.json`, and the manifest does not record how many records
+deduplication removed.
+
+**The AI-generation score is an estimate.** See **AI-Generated-Code Score** for what it can and cannot show.
+
+**Metrics are structural proxies.** They describe the shape and size of a snippet, not its difficulty or
+quality. The Maintainability Index is not capped at 100. See **Code Structure Metrics**.
 
 **Languages.** Python, Java, JavaScript (`.js`, `.jsx`) and C++ only. TypeScript is not processed.
 """)
