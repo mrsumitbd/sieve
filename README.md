@@ -21,6 +21,14 @@ SIEVE is a parameterized GitHub corpus builder for software engineering research
 
 **Live demo:** https://mrahman2025-sieve.hf.space
 
+**Demo video:** https://youtu.be/1Imgn7kpkNg — recorded with v0.1.1; the web UI has since changed (granularity checkboxes, a single **Export Full AST** toggle, and caps where `0` means no cap), so to reproduce the video exactly, install tag `v0.1.1`:
+
+```bash
+git clone --branch v0.1.1 https://github.com/mrsumitbd/sieve.git && cd sieve
+pip install -r requirements.txt
+streamlit run src/sieve/ui/Home.py
+```
+
 > **Note:** the public Hugging Face Space has 8 GB of RAM. Do not run large corpora there; [run the web UI locally](#run-the-web-ui-locally) or use the CLI instead.
 
 ---
