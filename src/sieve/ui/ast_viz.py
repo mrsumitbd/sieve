@@ -136,7 +136,9 @@ def render_ast_component(ast_json: dict, height: int = 500) -> str:
   body {{
     background: #1a1b26;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    overflow: auto;
+    /* st.iframe always allows scrolling; the tree scrolls inside #tree-container, so keep
+       the page itself from showing its own scrollbars when the controls bar overflows. */
+    overflow: hidden;
   }}
   #controls {{
     display: flex;

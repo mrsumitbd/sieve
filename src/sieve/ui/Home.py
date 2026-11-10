@@ -485,10 +485,9 @@ if st.session_state.summary:
                 with st.expander(label, expanded=True):
                     if deps:
                         from sieve.ui.dep_viz import render_dep_graph
-                        st.components.v1.html(
+                        st.iframe(
                             render_dep_graph(deps, selected, height=420),
                             height=420,
-                            scrolling=False,
                         )
                         dep_df = pd.DataFrame(deps)[["name", "version", "kind"]]
                         dep_df["version"] = dep_df["version"].fillna("latest")
@@ -703,10 +702,9 @@ if st.session_state.summary:
                         from sieve.ui.ast_viz import build_ast_json, render_ast_component
                         ast_json = build_ast_json(record.get("source_code", ""), rec_lang)
                         if ast_json:
-                            st.components.v1.html(
+                            st.iframe(
                                 render_ast_component(ast_json, height=520),
                                 height=520,
-                                scrolling=False,
                             )
                         else:
                             st.warning("AST could not be generated for this snippet.")
@@ -721,10 +719,9 @@ if st.session_state.summary:
                         from sieve.ui.ast_viz import build_ast_json, render_ast_component
                         ast_json = build_ast_json(record.get("source_code", ""), rec_lang)
                         if ast_json:
-                            st.components.v1.html(
+                            st.iframe(
                                 render_ast_component(ast_json, height=520),
                                 height=520,
-                                scrolling=False,
                             )
                         else:
                             st.warning("AST could not be generated for this snippet.")
