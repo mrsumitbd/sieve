@@ -26,6 +26,14 @@ st.divider()
 # ─── What is SIEVE? ───────────────────────────────────────────────────────────
 
 st.header("What is SIEVE?")
+DEMO_VIDEO_URL = "https://youtu.be/1Imgn7kpkNg"
+st.video(DEMO_VIDEO_URL)
+st.markdown(f"""
+[Watch the demo video on YouTube]({DEMO_VIDEO_URL}). It was recorded with v0.1.1; the web UI has since
+changed (granularity checkboxes, a single **Export Full AST** toggle, and caps where `0` means no cap),
+so to reproduce the video exactly, install tag `v0.1.1` (`git clone --branch v0.1.1
+https://github.com/mrsumitbd/sieve.git`).
+""")
 st.markdown("""
 SIEVE is a **parameterized GitHub corpus builder** for software engineering
 research. Rather than a static, pre-built dataset, SIEVE is a *tool* you run
