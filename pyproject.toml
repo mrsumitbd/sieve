@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sieve-corpus"
-version = "0.1.1"
+version = "0.2.0.dev0"
 description = "Software Ingestion & Extraction for Verifiable Evaluation — parameterized GitHub corpus builder for SE research"
 readme = "README.md"
 requires-python = ">=3.11"
