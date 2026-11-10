@@ -392,6 +392,12 @@ The full list is on the Documentation page. In short:
 
 ---
 
+## Supplementary materials
+
+[`supplementary_materials/`](supplementary_materials/) holds 400 records extracted by an early build of SIEVE (100 each for Python, Java, JavaScript and C++) that were used in a manual validation of its extraction. See its [README](supplementary_materials/README.md) for the layout, the fields and how to verify the files.
+
+---
+
 ## Documentation
 
 The web UI has a **Documentation** page and an **About the Classifier** page in its sidebar (on the [live demo](https://mrahman2025-sieve.hf.space), or locally with `streamlit run src/sieve/ui/Home.py`). The Documentation page covers every parameter, the record schemas, the 22 metrics, the engineered-project filter, deduplication, the `manifest.json` layout, dependency extraction, the architecture and how to extend SIEVE. The **FAQ** page answers common questions.
