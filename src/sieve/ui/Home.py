@@ -229,7 +229,7 @@ with st.sidebar:
     run_button = st.button(
         "▶ Run SIEVE",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -376,7 +376,7 @@ if st.session_state.summary:
                 data=data,
                 file_name=p.name,
                 mime="application/json" if p.suffix == ".jsonl" else "application/octet-stream",
-                use_container_width=True,
+                width="stretch",
             )
 
         # ZIP bundle
@@ -386,7 +386,7 @@ if st.session_state.summary:
             data=zip_data,
             file_name="sieve_corpus.zip",
             mime="application/zip",
-            use_container_width=True,
+            width="stretch",
         )
 
     # ── Charts ────────────────────────────────────────────────────────────────
@@ -454,7 +454,7 @@ if st.session_state.summary:
             # Repos whose contributor list GitHub would not return have no count;
             # a nullable integer column keeps the known counts whole (5, not 5.0).
             display_df["Contributors"] = display_df["Contributors"].astype("Int64")
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.dataframe(display_df, width="stretch", hide_index=True)
 
         # ── Dependency Graph ──────────────────────────────────────────────────
         all_repo_meta = s.get("repo_metadata", [])
@@ -493,7 +493,7 @@ if st.session_state.summary:
                         dep_df = pd.DataFrame(deps)[["name", "version", "kind"]]
                         dep_df["version"] = dep_df["version"].fillna("latest")
                         dep_df.columns = ["Package", "Version", "Kind"]
-                        st.dataframe(dep_df, use_container_width=True, hide_index=True)
+                        st.dataframe(dep_df, width="stretch", hide_index=True)
                     else:
                         st.info(
                             "No dependency manifest found for this repository. "
@@ -523,7 +523,7 @@ if st.session_state.summary:
                 help="Prepend import statements above the extracted code.",
             )
         with ctrl_col3:
-            sample_button = st.button("🎲 Draw random sample", use_container_width=True)
+            sample_button = st.button("🎲 Draw random sample", width="stretch")
 
         if sample_button:
             try:
@@ -678,7 +678,7 @@ if st.session_state.summary:
                 metrics_df = pd.DataFrame(metric_rows, columns=["Metric", "Value", "Description"])
                 st.dataframe(
                     metrics_df,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     column_config={
                         "Metric":      st.column_config.TextColumn(width="medium"),

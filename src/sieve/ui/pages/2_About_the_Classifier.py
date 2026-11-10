@@ -78,7 +78,7 @@ data = {
     "AI classes":      [5000, 5832, 976, 5848],
 }
 df = pd.DataFrame(data)
-st.dataframe(df, use_container_width=True, hide_index=True)
+st.dataframe(df, width="stretch", hide_index=True)
 
 st.markdown("""
 **Human code** was collected from GitHub repositories created after January 2024
@@ -118,7 +118,7 @@ perf = {
     "F1":        ["94.87%", "95.15%", "95.07%", "94.07%"],
     "AUROC":     ["99.03%", "99.10%", "99.34%", "98.70%"],
 }
-st.dataframe(pd.DataFrame(perf), use_container_width=True, hide_index=True)
+st.dataframe(pd.DataFrame(perf), width="stretch", hide_index=True)
 
 st.info(
     "The classifier leans toward **higher recall** (97.09%) over precision "
