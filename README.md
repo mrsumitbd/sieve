@@ -21,6 +21,8 @@ SIEVE is a parameterized GitHub corpus builder for software engineering research
 
 **Live demo:** https://mrahman2025-sieve.hf.space
 
+> **Note:** the public Hugging Face Space has 8 GB of RAM. Do not run large corpora there; [run the web UI locally](#run-the-web-ui-locally) or use the CLI instead.
+
 ---
 
 ## Why SIEVE?
@@ -68,23 +70,25 @@ python -m venv .venv
 
 **3. Install SIEVE and its dependencies**
 
-Runtime only:
+Runtime only (the first line of `requirements.txt` is `-e .`, so this also installs the `sieve` command; run it from the repository root):
 ```bash
 pip install -r requirements.txt
-pip install -e .
 ```
 
 For development and testing:
 ```bash
 pip install -r requirements-dev.txt
-pip install -e .
 ```
 
+On an Intel Mac (x86_64), PyTorch has no wheels after 2.2.2, which needs extra pins. See *Install troubleshooting* on the Documentation page.
+
 **4. Set up your GitHub token**
+
+Generate a classic token at [github.com/settings/tokens](https://github.com/settings/tokens) with the `public_repo` scope. For the CLI, either export it or put it in `.env`:
 ```bash
-cp .env.example .env
+export GITHUB_TOKEN=<your token>       # or: cp .env.example .env and fill in GITHUB_TOKEN
 ```
-Open `.env` and add the line `GITHUB_TOKEN=<your GitHub Personal Access Token>`. Generate one at [github.com/settings/tokens](https://github.com/settings/tokens); only the `public_repo` scope is needed. The CLI reads this file. The web UI does not, so paste the token into the sidebar there.
+The CLI also reads `HF_TOKEN` (optional, only for `--annotate-llm-score`). The web UI reads neither variable: paste the GitHub token into its sidebar.
 
 ---
 
@@ -92,17 +96,24 @@ Open `.env` and add the line `GITHUB_TOKEN=<your GitHub Personal Access Token>`.
 
 ### Web Interface
 
+#### Run the web UI locally
+
+Repository processing (cloning and extraction) is sequential, so a large run takes a long time and a lot of memory. Run large jobs on your own machine, not on the 8 GB public Space. The full guide is on the Documentation page.
+
 ```bash
+git clone https://github.com/mrsumitbd/sieve.git && cd sieve   # Python 3.11+
+python -m venv .venv && source .venv/bin/activate              # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 streamlit run src/sieve/ui/Home.py
 ```
 
-Open `http://localhost:8501`, configure parameters in the sidebar and click **▶ Run SIEVE** to build a corpus. A GitHub token is optional but recommended for full runs.
+Open `http://localhost:8501`, paste a GitHub token into the sidebar (recommended), configure the parameters and click **▶ Run SIEVE**. Stop the server with `Ctrl+C` in the terminal.
 
 ### CLI
 
 ```bash
 sieve run --language Python --start-date 2024-01-01 --end-date 2025-01-01 \
-          --min-stars 50 --min-contributors 5
+          --min-stars 50 --min-contributors 5 --granularity function --deduplicate
 
 # From config file
 sieve run --config my_config.json
@@ -110,6 +121,8 @@ sieve run --config my_config.json
 # Validate config without running
 sieve validate-config my_config.json
 ```
+
+By default a GitHub rate limit that will not clear within about a minute stops the run with an error. Add `--wait-for-rate-limit` to sleep until it resets and carry on (the web UI never waits).
 
 ### Python API
 
@@ -141,33 +154,36 @@ print(summary)
 
 ## Parameters
 
-Defaults differ between interfaces where noted. "CLI/API" means the `sieve run` command and `SIEVEConfig`.
+"CLI" is `sieve run`; "config" is a JSON file passed to `--config` or a `SIEVEConfig` object. Defaults differ between interfaces where noted. The Documentation page has a table that maps each parameter to its CLI flag, config key and web UI control.
 
-| Option | CLI flag | Type | Default | Description |
-|---|---|---|---|---|
-| `language` | `--language` | str | required in API and CLI; web UI: `Python` | Target language: `Python`, `Java`, `JavaScript`, `C++` |
-| `start_date` | `--start-date` | date (`YYYY-MM-DD` on the CLI) | required in API and CLI (unless `--config`); web UI: 2024-01-01 | Earliest repository creation date (YYYY-MM-DD). Bounds repository age (for example for contamination-aware evaluation); it does not verify snippet origin. |
-| `end_date` | `--end-date` | date (`YYYY-MM-DD` on the CLI) | required in API/config; CLI: 30 days before today if omitted; web UI: 30 days before today (rolling, editable) | Only include repos **created** on or before this date. Must be on or after `start_date` |
-| `min_stars` | `--min-stars` | int | CLI/API: 10; web UI: 50 | Minimum GitHub stars |
-| `min_contributors` | `--min-contributors` | int (at least 1) | CLI/API: 1; web UI: 5 | Minimum unique contributors |
-| `max_repos` | `--max-repos` | int \| None | CLI/API: None (no cap); web UI: 20 | Cap on repos to process, applied during discovery (repos are taken in descending star order). In the CLI/API leave it unset for no cap, because 0 yields no repos. In the web UI, 0 means no cap |
-| `max_functions` | `--max-functions` | int \| None | CLI/API: None (no cap); web UI: 30 | Cap on total extracted functions (stratified by repo). In the CLI/API leave it unset for no cap, because 0 extracts no functions, and do not pass -1 (use `granularity` to skip a level). In the web UI, 0 means no cap and -1 skips function extraction |
-| `max_classes` | `--max-classes` | int \| None | CLI/API: None (no cap); web UI: 30 | Cap on total extracted classes (stratified by repo). Same rules as `max_functions`; in the web UI, -1 skips class extraction |
-| `granularity` | config file / API only | list | `["function", "class"]` | `function`, `class`, or both. The CLI always extracts both; the web UI derives it from the -1 values of `max_functions` and `max_classes` |
-| `engineered_only` | `--engineered-only` / `--no-engineered-only` | bool | False | Apply engineered project filter (Xiao et al., 2025; in the spirit of Reaper, Munaiah et al., 2017). See the notes below |
-| `annotate_llm_score` | config file / API only | bool | False | Score each record with P(AI-generated) via CodeBERT classifier. The classifier weights are downloaded from HuggingFace Hub on first use. Also available as a web UI toggle |
-| `export_ast` | config file / API only | bool | False | Include the full AST as nested JSON in every record (increases file size significantly). The summary fields `ast_depth`, `ast_num_nodes`, and `ast_node_types` are always present. In the web UI this is the "Include Full AST in Export" toggle |
-| `deduplicate` | `--deduplicate` / `--no-deduplicate` | bool | CLI: True; API/config: False; web UI: off | Apply MinHash near-duplicate removal |
-| `dedup_threshold` | `--dedup-threshold` | float (0 to 1) | 0.8 | Jaccard similarity threshold for deduplication (web UI slider: 0.5 to 1.0) |
-| `output_dir` | `--output-dir` | str | `./sieve_output` | Local path for output files. The web UI writes to a temporary directory and offers downloads instead |
-| `export_format` | `--export-format` | str | `jsonl` | `jsonl`, `parquet`, or `both` |
-| `github_token` | `--github-token` | str | None | GitHub Personal Access Token for higher rate limits |
-| `hf_token` | config file / API only | str | None | HuggingFace token for downloading classifier weights (only used with `annotate_llm_score`) |
+| Config key | CLI flag | Default | Description |
+|---|---|---|---|
+| `language` | `--language` | required; web UI: `Python` | `Python`, `Java`, `JavaScript`, `C++` |
+| `start_date` | `--start-date` | required; web UI: 2024-01-01 | Earliest repository **creation** date (`YYYY-MM-DD`). Bounds repository age; it does not verify the origin of each snippet |
+| `end_date` | `--end-date` | required in config; CLI and web UI: 30 days before today | Latest repository creation date; on or after `start_date` |
+| `min_stars` | `--min-stars` | CLI/config: 10; web UI: 50 | Minimum GitHub stars |
+| `min_contributors` | `--min-contributors` | CLI/config: 1; web UI: 5 | Minimum contributors, at least 1. Bots are not counted |
+| `max_repos` | `--max-repos` | none (no cap); web UI: 20 | Cap on repositories to process. Omit it (`null` in a config file) for no cap, otherwise it must be at least 1. Web UI: 0 means no cap |
+| `max_functions` | `--max-functions` | none; web UI: 30 | Cap on total extracted functions, stratified by repository. Same rules as `max_repos` |
+| `max_classes` | `--max-classes` | none; web UI: 30 | Cap on total extracted classes, stratified by repository. Same rules as `max_repos` |
+| `granularity` | `--granularity function\|class\|both` | both (a list in the config file) | What to extract. Web UI: the **Extract functions** and **Extract classes** checkboxes. At least one is required |
+| `engineered_only` | `--engineered-only` / `--no-engineered-only` | off | Engineered project filter (Xiao et al., 2025; in the spirit of Reaper, Munaiah et al., 2017). See the notes below |
+| `annotate_llm_score` | `--annotate-llm-score` / `--no-annotate-llm-score` | off | Score each record with P(AI-generated) using a CodeBERT classifier. Weights are downloaded from the Hugging Face Hub on first use |
+| `export_ast` | `--export-ast` / `--no-export-ast` | off | Include the full AST as nested JSON in every record (large). `ast_depth`, `ast_num_nodes` and `ast_node_types` are always exported. Web UI: **Export Full AST** |
+| `deduplicate` | `--deduplicate` / `--no-deduplicate` | off in every interface | MinHash near-duplicate removal |
+| `dedup_threshold` | `--dedup-threshold` | 0.8 | Jaccard similarity threshold, 0 to 1 (web UI slider: 0.5 to 1.0). Used only when deduplication is on |
+| `output_dir` | `--output-dir` | `./sieve_output` | Output directory. The web UI writes to a temporary directory and offers downloads |
+| `export_format` | `--export-format` | `jsonl` | `jsonl`, `parquet` or `both` |
+| `github_token` | `--github-token`, or the `GITHUB_TOKEN` environment variable | none | GitHub token. Without one GitHub allows 60 requests per hour |
+| `hf_token` | none; the `HF_TOKEN` environment variable | none | Hugging Face token, optional, only used with `annotate_llm_score` |
+| `wait_for_rate_limit` | `--wait-for-rate-limit` / `--no-wait-for-rate-limit` | off | Sleep until a GitHub rate limit resets and carry on, instead of stopping. Not available in the web UI |
 
 Notes:
 
-- `--config` takes precedence over individual flags: when it is given, the JSON file is the only source of settings and every other flag is ignored. Fields missing from the file take the API/config defaults above (for example `deduplicate` is False). This includes the token, so with `--config` set `github_token` in the file.
-- The GitHub token is read from `--github-token` or the `GITHUB_TOKEN` environment variable in the CLI (without `--config`), from the `github_token` field in the API, and only from the text box in the web UI (no environment fallback). Without a token GitHub allows 60 requests per hour.
+- With `--config`, the JSON file is the only source of settings and every other flag, including `--github-token`, is ignored. Fields missing from the file take the config defaults above. Unknown keys are an error.
+- Tokens: `GITHUB_TOKEN` and `HF_TOKEN` are read from the environment by the CLI, with flags and with `--config`; they fill only a token that is still unset, so a token written in the config file takes precedence. There is no `--hf-token` flag. Tokens are never written to `manifest.json` or to the config printed at the start of a run. A config file is plain text, so prefer the environment variable. The web UI reads neither variable.
+- Caps: `0` and negative numbers are rejected by the CLI and config. To skip functions or classes, drop that level from `granularity`.
+- Discovery: GitHub search returns at most 1,000 results per query, so a larger result set is collected by splitting the creation-date range into windows; what was and was not covered is recorded in the `discovery` block of `manifest.json`.
 - When `engineered_only` is on, the filter applies a license check (repos with no license or an excluded license are dropped), a no-release exclusion, a minimum of 2 contributors, and bottom-Q1 exclusion on pull-request count and issue count. The effective contributor threshold is `max(min_contributors, 2)`, because discovery applies `min_contributors` first. The Q1 (25th percentile) thresholds are computed over the candidates that pass the license, release, and contributor checks within the discovered pool (after `min_stars`, `min_contributors`, and `max_repos` have been applied), not over all of GitHub. The LOC and code-ratio criteria are implemented in `core/quality.py` but are not applied by the pipeline, because filtering runs before repositories are cloned.
 
 ---
@@ -195,6 +211,7 @@ Notes:
   "parent_class": null,
   "commit_sha": "a1b2c3d4...",
   "llm_score": 0.12,
+  "llm_score_truncated": false,
   "ast_depth": 8,
   "ast_num_nodes": 54,
   "ast_node_types": {"function_definition": 1, "return_statement": 1},
@@ -227,6 +244,7 @@ Notes:
   "end_line": 45,
   "commit_sha": "a1b2c3d4...",
   "llm_score": 0.31,
+  "llm_score_truncated": false,
   "cyclomatic_complexity": 5,
   "maintainability_index": 68.1
 }
@@ -234,7 +252,13 @@ Notes:
 
 ### Manifest (`manifest.json`)
 
-A JSON file capturing the full config, per-repo metadata, and summary statistics. Share it to let others reproduce the same corpus.
+A JSON file capturing the config (never any token), per-repo metadata and summary statistics. Share it to let others reproduce the same corpus. It records:
+
+- `sieve_version`, `generated_at`, `config`, `repos` (one entry per processed repository, with the star count and other metadata as collected) and `summary` (`total_repos`, `total_functions`, `total_classes`, `total_llm_scored`, `total_llm_score_truncated`).
+- `discovery`: whether the repository search covered everything that matched, the windows it used, single days that held more than 1,000 repositories, repositories dropped because their contributors could not be fetched, and how long the run waited on rate limits.
+- `extraction`: the directory names extraction skips and how many source files that skipped.
+
+`llm_score_truncated` is `true` for a record whose score reflects only its first 512 tokens, and `null` when the record was not scored.
 
 ---
 
@@ -280,7 +304,15 @@ The suite covers unit, integration, and end-to-end levels. GitHub and git are mo
 
 ## Known Limitations
 
-**C++ parsing is slower than other languages.** C++ extraction takes 2–5× longer than Python, Java, or JavaScript repositories of comparable size. This is a known limitation of `tree-sitter-cpp` — C++ has fundamental syntactic ambiguities (e.g. `a * b` can be a multiplication or a pointer declaration) that require Generalized LR (GLR) parsing to resolve at runtime, which is more expensive than the deterministic LR(1) parsing used for the other languages. See the [Documentation page](https://mrahman2025-sieve.hf.space) for details.
+The full list is on the Documentation page. In short:
+
+- **Creation date is not code age.** The date filter uses the repository's GitHub creation date. A repository with imported history can contain commits that predate it.
+- **No snapshot date.** Results depend on when the run happens, and the default branch HEAD at that moment is what is cloned. The manifest records `generated_at`, a `collected_at` timestamp per repository and the cloned `commit_sha` on each record, not a fixed snapshot.
+- **Skipped directories.** `vendor`, `vendored`, `third_party`, `third-party`, `site-packages`, `node_modules`, `dist`, `build`, `venv`, `.venv`, `.tox` and `.eggs` are skipped, at any depth. `external` and `env` are not skipped.
+- **Test-file rules are not language-specific.** A file name that starts with `Test` is dropped in every language (so `Testimonials.js` too), and `test/`, `tests/`, `__tests__/`, `spec/` and `specs/` directories are skipped. `*Tests.java`, `*IT.java`, `*.test.jsx` and `foo_test.h` are not treated as tests.
+- **A narrow Pass 1 / Pass 2 gap.** Pass 1 counts exactly what Pass 2 extracts, except that a file which parses but fails while its records are built is counted in Pass 1 and dropped in Pass 2.
+- **Sequential processing.** Repositories are processed one after another, not in parallel, so large runs are slow.
+- **C++ parsing is slower than other languages.** C++ extraction takes 2–5× longer than Python, Java or JavaScript repositories of comparable size. This is a known limitation of `tree-sitter-cpp`: C++ has syntactic ambiguities (e.g. `a * b` can be a multiplication or a pointer declaration) that require Generalized LR (GLR) parsing, which is more expensive than the deterministic LR(1) parsing used for the other languages.
 
 ---
 

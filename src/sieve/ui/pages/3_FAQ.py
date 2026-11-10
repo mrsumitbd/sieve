@@ -164,7 +164,11 @@ with st.expander("What granularities does SIEVE extract?"):
     - **Class level** — full class bodies, extracted with a skeleton
       (signatures + docstrings, no implementation) alongside the full source.
 
-    You can extract both granularities in a single run.
+    You can extract both granularities in a single run, which is the default. To extract only
+    one, use the **Extract functions** and **Extract classes** checkboxes in the web UI, or
+    `--granularity function`, `--granularity class` or `--granularity both` on the CLI (`granularity`
+    in a config file). At least one level is required. A cap of `0` means "no cap" in the web UI
+    only; the CLI and config file take no value for no cap, or a number of at least 1.
     """)
 
 # ── GitHub Token ──────────────────────────────────────────────────────────────
@@ -189,8 +193,32 @@ with st.expander("How do I get a GitHub Personal Access Token (PAT)?"):
     5. Click **Generate token** and copy it
     6. Paste it into the **GitHub Token** field in the sidebar
 
-    Your token is never stored — it is only used for the duration of the current
-    session.
+    In the web UI the token is not stored — it is only used for the duration of the current
+    session. In the CLI, set the `GITHUB_TOKEN` environment variable (or pass `--github-token`).
+    The optional Hugging Face token for LLM scoring is read from `HF_TOKEN` in the CLI; there is no
+    `--hf-token` flag. Tokens are never written to `manifest.json`. The web UI does not read either
+    environment variable.
+    """)
+
+with st.expander("What happens when I hit the GitHub rate limit?"):
+    st.markdown("""
+    By default the run fails fast: a rate limit that will not clear within about a minute stops the
+    run with a message that gives the reset time. If some repositories had already been found, the run
+    continues with them and the results are marked partial.
+
+    On the CLI, `--wait-for-rate-limit` makes the run sleep until the limit resets and carry on. A wait
+    can last up to an hour, and nothing is written until the run ends. **The web UI never waits**, so
+    use a token there and keep runs small. See **GitHub Rate Limits** on the Documentation page.
+    """)
+
+with st.expander("How do I know the repository list is complete?"):
+    st.markdown("""
+    Read the `discovery` block of `manifest.json`. `complete` is `true` when every matching
+    repository was reachable. GitHub search returns at most 1,000 results per query, so SIEVE
+    splits the creation-date range into windows to collect more. If one day alone holds more than 1,000
+    matching repositories, only its 1,000 most-starred are collected and the day is listed in
+    `truncated_windows`. Repositories whose contributors could not be fetched are listed in `excluded`.
+    Contributor counts are exact and exclude bots; `null` means GitHub would not list the contributors.
     """)
 
 # ── LLM Score ─────────────────────────────────────────────────────────────────
@@ -264,9 +292,13 @@ with st.expander("How do I download the corpus?"):
 
 with st.expander("The tool crashes or becomes unresponsive during a large run. What should I do?"):
     st.markdown("""
-    SIEVE is hosted on HuggingFace Spaces with **16 GB RAM**. For very large runs,
-    the process can exhaust available memory and crash. This is expected behavior —
-    not a bug.
+    The public SIEVE Space on HuggingFace has **8 GB of RAM**, so do not run large corpora there.
+    For very large runs, the process can exhaust available memory and crash. This is expected
+    behavior — not a bug. Run large jobs on your own machine (see **Run the Web UI Locally** on the
+    Documentation page) or with the CLI.
+
+    Repositories are processed one after another, not in parallel. A large run is therefore slow,
+    not just big.
 
     **Common causes:**
     - Discovering thousands of repos (large date windows + low star thresholds)
@@ -303,10 +335,12 @@ with st.expander("The tool crashes or becomes unresponsive during a large run. W
 
 with st.expander("Can I run SIEVE locally via the command line?"):
     st.markdown("""
-    Yes. Install the package and run:
+    Yes. From the repository root, install the dependencies (this also installs the `sieve` command)
+    and run:
 
     ```bash
-    pip install -e .
+    pip install -r requirements.txt
+    export GITHUB_TOKEN=<your token>
     sieve run --language Python \\
                --start-date 2024-01-01 \\
                --end-date 2025-01-01 \\
@@ -315,8 +349,32 @@ with st.expander("Can I run SIEVE locally via the command line?"):
                --output-dir ./my_corpus
     ```
 
-    See the [GitHub repository](https://github.com/mrsumitbd/sieve) for full
-    CLI documentation.
+    Deduplication is off unless you add `--deduplicate`. See the
+    [GitHub repository](https://github.com/mrsumitbd/sieve) for the full CLI documentation and the
+    **Parameter Parity Across Interfaces** table on the Documentation page for every flag.
+    """)
+
+with st.expander("Can I run the web UI on my own machine?"):
+    st.markdown("""
+    Yes, and you should for large runs, since the public Space has 8 GB of RAM. You need Python 3.11
+    or newer and git. In short:
+
+    ```bash
+    git clone https://github.com/mrsumitbd/sieve.git && cd sieve
+    python -m venv .venv && source .venv/bin/activate
+    pip install -r requirements.txt
+    streamlit run src/sieve/ui/Home.py
+    ```
+
+    Then open `http://localhost:8501`, paste a GitHub token into the sidebar, and stop the server with
+    `Ctrl+C`. The step-by-step guide is under **Run the Web UI Locally** on the Documentation page.
+    """)
+
+with st.expander("`pip install` fails or LLM scoring breaks on an Intel Mac. What do I do?"):
+    st.markdown("""
+    PyTorch has no macOS x86_64 wheels after 2.2.2, and that version needs older NumPy and
+    Transformers. Run `pip install "torch==2.2.2" "numpy<2" "transformers<5"`. See **Install
+    Troubleshooting** on the Documentation page.
     """)
 
 with st.expander("Why do I see repos with the Unlicense even with Engineered Projects enabled?"):
@@ -353,14 +411,11 @@ with st.expander("Why does a repository show 0 functions/methods or 0 classes?")
     This is expected behavior — not a bug. There are several reasons a repository
     may contribute 0 records for a given granularity:
 
-    **1. The repository has very few real definitions after filtering.**
-    SIEVE filters out forward declarations, test files, and other non-substantive
-    code. A repository may appear to have classes or functions at the file level
-    but yield 0 after filtering.
-
-    For example, `ocornut/imgui` is a single-header C++ library. Pass 1 counted
-    9 classes, but most are forward declarations (`class ImGuiContext;`) which
-    SIEVE correctly excludes. After filtering, 0 real class definitions remain.
+    **1. The repository has no extractable definitions of that kind.**
+    SIEVE counts and extracts only the definitions its parsers recognise, in the files it visits.
+    Forward declarations (for example a C++ `class Foo;` with no body) are not counted or extracted,
+    so a header that only forward-declares its classes contributes 0 classes. Pass 1 counts exactly
+    what Pass 2 extracts, so a Pass 1 count of 0 means there was nothing for Pass 2 to extract.
 
     **2. The cap is smaller than the number of repositories.**
     When **Max Functions/Methods** or **Max Classes** is set, SIEVE gives every
@@ -369,29 +424,54 @@ with st.expander("Why does a repository show 0 functions/methods or 0 classes?")
     with records, that minimum cannot be met: the largest repositories get 1 slot
     each and the others get 0.
 
-    For example, with Max Classes = 30 across 10 repos where `godot` has 8,168
-    classes and `imgui` has 9, imgui still receives at least 1 slot rather than
-    being rounded down to 0. If the repo then returns 0 real classes after
-    filtering (see point 1), nothing can be done.
+    For example, with Max Classes = 30 across 10 repos where one repo has thousands of classes
+    and another has 9, the smaller repo still receives at least 1 slot rather than being rounded
+    down to 0.
 
-    **3. All source files are test files.**
-    SIEVE skips files in `test/`, `tests/`, `spec/` directories and files named
-    `test_*.py`, `*_test.cpp`, etc. A repo whose source is predominantly tests
-    may yield 0 records.
+    **3. Its source is skipped.**
+    SIEVE leaves out directories such as `vendor`, `node_modules`, `build`, `dist` and `venv`, the
+    test directories `test/`, `tests/`, `__tests__/`, `spec/` and `specs/`, and test files by name:
+    names starting with `test_` or `Test`, and names ending in `_test.py`, `Test.java`, `.test.js`,
+    `.spec.js`, `_test.cpp` or `_test.cc`. These rules apply to every language, so a file such as
+    `Testimonials.js` is dropped too. A repo whose source sits mostly in those places may yield 0
+    records. The `extraction` block of `manifest.json` lists the skipped directory names and counts
+    the files they held. The full rules are under **What Extraction Skips** on the Documentation page.
 
     **4. No matching granularity.**
     If you select only **Class** granularity, a repository that only contains
     standalone functions will show 0 classes. Similarly for **Function/Method**
     in a class-only repo.
 
-    **5. Minified or generated files (JavaScript only).**
-    SIEVE skips `.min.js` files and files with very long lines (webpack bundles).
-    A JavaScript repo that ships only minified builds may yield 0 records.
+    **5. Unsupported or minified files.**
+    Only `.py` (Python), `.java` (Java), `.js` and `.jsx` (JavaScript) and the C++ extensions
+    `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hxx` are processed; TypeScript is not. For JavaScript,
+    `.min.js` files and files with very long lines (webpack bundles) are skipped, so a repo that
+    ships only minified builds may yield 0 records.
 
     **What to do:** SIEVE's Pass 3 automatically redistributes unmet slots to
     other repos with remaining capacity. If you still fall short, try increasing
     **Max Functions/Methods** and **Max Classes** or reducing **Max Repos** so
     each repo has a larger proportional allocation.
+    """)
+
+with st.expander("Is the Pass 1 count exact?"):
+    st.markdown("""
+    Yes, with one narrow exception. Pass 1 (counting, used to split the caps across repositories)
+    selects files with the same code as Pass 2 (extraction) and finds functions and classes with the
+    same walk, so with no caps both give the same numbers. The exception is a file that parses but
+    then fails while its records are built: Pass 1 counts it and Pass 2 drops it. A repository that
+    changed between the Pass 1 clone and the Pass 2 clone can also differ.
+    """)
+
+with st.expander("Are the results a fixed snapshot of GitHub?"):
+    st.markdown("""
+    No. SIEVE searches GitHub when the run happens and clones each repository's default branch HEAD
+    at that moment, so a rerun on another day can give a different corpus. The manifest records
+    `generated_at`, a `collected_at` timestamp and the star count per repository, and each record
+    carries the `commit_sha` that was cloned, but it does not pin a snapshot you could re-fetch.
+    Also, the creation-date filter uses the repository's GitHub creation date: a repository with
+    imported history can contain commits older than that date. See **Known Limitations** on the
+    Documentation page.
     """)
 
 # ── Citation ──────────────────────────────────────────────────────────────────

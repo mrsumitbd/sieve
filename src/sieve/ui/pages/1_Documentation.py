@@ -7,6 +7,8 @@ Automatically discovered by Streamlit's multipage feature when placed in pages/.
 
 import streamlit as st
 
+from sieve import __version__
+
 st.set_page_config(
     page_title="SIEVE — Documentation",
     page_icon="📖",
@@ -15,6 +17,10 @@ st.set_page_config(
 
 st.title("📖 SIEVE Documentation")
 st.caption("**S**oftware **I**ngestion & **E**xtraction for **V**erifiable **E**valuation")
+st.info(
+    "**The public Hugging Face Space has 8 GB of RAM.** Do not run large corpora there. "
+    "Run the web UI on your own machine (see **Run the Web UI Locally** below) or use the CLI."
+)
 st.divider()
 
 # ─── What is SIEVE? ───────────────────────────────────────────────────────────
@@ -49,7 +55,7 @@ on which parameters you configure:
 
 - **Contamination-aware LLM evaluation.** Filter repositories by *creation date* (not last push date) so that every sampled repository is newer than a chosen date such as a model's release date; see **Contamination-Aware Evaluation** below for the rationale, its limits, and a cutoff-date reference table.
 - **Dependency-management research.** Every processed repository's package manifest is parsed automatically; the corpus manifest and the **Dependency Graph** panel expose these for supply-chain and library-usage studies.
-- **Structural analysis of LLM-generated code.** Enable **Annotate LLM Score** and **Export AST** to get a P(AI-generated) probability and full parse-tree features on every record — useful for studying how AI-authored and human-authored code differ structurally.
+- **Structural analysis of LLM-generated code.** Enable **Annotate LLM Score** and **Export Full AST** to get a P(AI-generated) probability and the full parse tree on every record (the summary AST features are always exported) — useful for studying how AI-authored and human-authored code differ structurally.
 - **General-purpose corpus building.** The creation-date filter is equally useful for bounding a corpus to a specific development era for longitudinal studies, independent of any LLM, or simply source a richly-annotated, deduplicated corpus for any language-specific study.
 """)
 
@@ -229,6 +235,97 @@ Stating the bound and its limits explicitly lets reviewers judge the contaminati
 
 st.divider()
 
+# ─── Run locally ──────────────────────────────────────────────────────────────
+
+st.header("Run the Web UI Locally")
+st.warning(
+    "The public Hugging Face Space has **8 GB of RAM**. Large runs (many repositories, C++, "
+    "full ASTs, LLM scoring) can exhaust it. Run them on your own machine."
+)
+st.markdown("""
+Repositories are processed one after another, not in parallel, so a large run is slow
+whatever the hardware.
+
+**Prerequisites**
+
+- **Python 3.11 or newer** (`requires-python = ">=3.11"` in `pyproject.toml`). Check with `python --version`.
+- **git**, because SIEVE clones each repository with `git clone --depth 1`.
+- A **GitHub token** is optional but recommended. Without one GitHub allows 60 requests per hour.
+
+**Steps**
+
+1. Get the code and enter the repository root:
+   ```bash
+   git clone https://github.com/mrsumitbd/sieve.git
+   cd sieve
+   ```
+2. Create and activate a virtual environment:
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate        # Windows: .venv\\Scripts\\activate
+   ```
+3. Install the dependencies. Run this from the repository root: the first line of
+   `requirements.txt` is `-e .`, which installs SIEVE itself and the `sieve` command.
+   The file also lists PyTorch and Transformers (used only for LLM scoring), which are large downloads.
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Create a classic GitHub token with the `public_repo` scope at
+   [github.com/settings/tokens](https://github.com/settings/tokens). **The web UI does not read
+   `GITHUB_TOKEN`**: paste the token into the **GitHub Token (PAT)** field in the sidebar after the app
+   opens. (`GITHUB_TOKEN` and `HF_TOKEN` are read by the CLI only.)
+5. Start the app from the repository root:
+   ```bash
+   streamlit run src/sieve/ui/Home.py
+   ```
+6. Open **http://localhost:8501** in a browser (Streamlit's default port; the terminal prints the
+   address, and Streamlit may open it for you). To use another port, add `--server.port 8600`.
+7. Set the parameters in the sidebar and click **▶ Run SIEVE**. The web UI writes its output to a
+   temporary directory and offers it through the **Download Corpus** buttons. To write straight to a
+   directory of your choice, use the CLI with `--output-dir`.
+8. Stop the app with `Ctrl+C` in the terminal that is running it, then leave the virtual environment
+   with `deactivate`.
+""")
+
+st.divider()
+
+# ─── Install troubleshooting ──────────────────────────────────────────────────
+
+st.header("Install Troubleshooting")
+st.markdown("""
+SIEVE needs Python 3.11 or newer. The repository pins no upper versions: `pyproject.toml` and
+`requirements.txt` give lower bounds only (for example `numpy>=1.26.0`, `torch>=2.1.0`,
+`transformers>=4.38.0`). On Windows, Linux and Apple-silicon Macs a plain
+`pip install -r requirements.txt` needs nothing more.
+
+**What is installed where.** `pyproject.toml` lists the core dependencies. `requirements.txt` adds
+`torch`, `transformers`, `huggingface_hub` and `sentencepiece`, which only **Annotate LLM Score** uses.
+If they are missing, the scoring step reports an error and the run continues without scores.
+
+**Intel Macs (x86_64).** PyPI has no PyTorch wheels for macOS x86_64 after **2.2.2**, so pip installs
+torch 2.2.2 there. With the other requirements left unpinned, pip also picks NumPy 2 and Transformers 5,
+and neither works with torch 2.2.2:
+
+- **NumPy 2:** torch 2.2.2 was built against NumPy 1.x. It prints
+  `Failed to initialize NumPy: _ARRAY_API not found` and its NumPy interop does not work.
+- **Transformers 5:** version 5.22.2 refuses to load the model with
+  `RobertaModel requires PyTorch >= 2.6`.
+
+Install the compatible versions explicitly:
+
+```bash
+pip install "torch==2.2.2" "numpy<2" "transformers<5"
+```
+
+With torch 2.2.2, `numpy<2` and `transformers<5` (4.57.6 was used), SIEVE's classifier and export
+tests pass. This was checked by running the tests with those versions on an Apple-silicon Mac;
+it was not run on Intel hardware. If you do not use **Annotate LLM Score**, none of these pins
+matter for the rest of SIEVE.
+
+**`sieve: command not found`.** Activate the virtual environment, or run
+`python -m sieve.cli run ...` instead.
+""")
+
 st.divider()
 
 # ─── Parameters ───────────────────────────────────────────────────────────────
@@ -263,17 +360,20 @@ st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
 | **Min Stars** | Minimum GitHub star count. Higher values bias toward popular, well-maintained projects but reduce diversity. |
-| **Min Contributors** | Minimum unique contributor count. Helps exclude personal or toy projects. Note: bots are excluded from the count. |
-| **Max Repos** | Hard cap on the number of repos to process (0 = no cap; default 20). Applies during discovery, before cloning. |
-| **Max Functions** | Cap on total extracted functions *after deduplication* (-1 = skip, 0 = no cap; default 30). When the corpus exceeds this, stratified sampling is applied (see below). |
-| **Max Classes** | Cap on total extracted classes *after deduplication* (-1 = skip, 0 = no cap; default 30). Same stratified sampling applies. |
+| **Min Contributors** | Minimum number of human contributors, at least 1. Helps exclude personal or toy projects. Bots are not counted, and the count is exact (see **Repository Discovery**). |
+| **Max Repos** | Cap on the number of repos to process. Applies during discovery, before cloning. Web UI: `0` = no cap (default 20). CLI and config file: omit it (`null`) for no cap, otherwise it must be at least 1. |
+| **Max Functions** | Cap on total extracted functions *after deduplication*. Web UI: `0` = no cap (default 30). CLI and config file: omit it for no cap, otherwise at least 1. When the corpus exceeds the cap, stratified sampling is applied (see below). |
+| **Max Classes** | Cap on total extracted classes *after deduplication*. Same rules and stratified sampling as **Max Functions**. |
+
+The `0` = no cap convention exists in the web UI only. The CLI and config reject `0` and negative
+numbers. To skip functions or classes, do not extract that level (see **Granularity** below).
 """)
 
 st.subheader("Content Filters")
 st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
-| **Granularity** | Choose to extract functions, classes, or both. |
+| **Granularity** | Which program units to extract: functions, classes, or both (default both). CLI: `--granularity function`, `class` or `both`. Config file: `granularity`, a list such as `["function"]`. Web UI: the **Extract functions** and **Extract classes** checkboxes (at least one must stay checked; the cap of an unchecked level is disabled). |
 | **Engineered Projects Only** | Applies the engineered project filter of Xiao et al. (2025), in the spirit of Reaper (Munaiah et al., 2017). See section below. |
 """)
 
@@ -281,12 +381,184 @@ st.subheader("Deduplication")
 st.markdown("""
 | Parameter | Description |
 |-----------|-------------|
-| **Deduplicate** | Enable MinHash LSH near-duplicate removal across all extracted records. |
-| **Similarity Threshold** | Jaccard similarity threshold for MinHash deduplication (0.0–1.0). Higher values are more conservative — only near-identical code is removed. Default: 0.8. |
+| **Deduplicate** | Enable MinHash LSH near-duplicate removal across all extracted records. **Off by default in every interface** (CLI `--deduplicate`, config `deduplicate`, web UI **Deduplicate** toggle). |
+| **Similarity Threshold** | Jaccard similarity threshold for MinHash deduplication (0.0–1.0; the web UI slider covers 0.5–1.0). Higher values are more conservative — only near-identical code is removed. Default: 0.8. Used only when deduplication is on. |
 
 Deduplication tokenizes source code (stripping string literals and normalizing whitespace) before
 hashing, so superficial differences like renamed variables or changed comments do not prevent
 duplicate detection.
+""")
+
+st.subheader("Annotation and Output")
+st.markdown("""
+| Parameter | Description |
+|-----------|-------------|
+| **Annotate LLM Score** | Score each record with P(AI-generated). CLI `--annotate-llm-score`, config `annotate_llm_score`. Default off. Downloads the classifier weights on first use. |
+| **Export Full AST** | Include the full AST as nested JSON in each record's `ast` field. CLI `--export-ast`, config `export_ast`, web UI **Export Full AST** toggle. Default off; it increases file size significantly. |
+| **Export Format** | `jsonl` (default), `parquet` or `both`. |
+| **Output Directory** | CLI `--output-dir`, config `output_dir` (default `./sieve_output`). The web UI has no such field: it writes to a temporary directory and offers downloads. |
+
+The AST summary features `ast_depth`, `ast_num_nodes` and `ast_node_types` are **always** exported.
+Only the full AST JSON (`ast`) depends on **Export Full AST**.
+""")
+
+st.subheader("Tokens and Rate-Limit Waiting")
+st.markdown("""
+| Parameter | Description |
+|-----------|-------------|
+| **GitHub token** | CLI: `--github-token`, or the `GITHUB_TOKEN` environment variable. Config file: `github_token`. Web UI: the **GitHub Token (PAT)** field only. Without a token GitHub allows 60 requests per hour. |
+| **Hugging Face token** | Optional; only used to download the classifier weights. Config file: `hf_token`. CLI: the `HF_TOKEN` environment variable (there is **no** `--hf-token` flag). The web UI has no field for it. |
+| **Wait for rate limit** | CLI `--wait-for-rate-limit`, config `wait_for_rate_limit`. Default off. Not available in the web UI, which never waits. See **GitHub Rate Limits**. |
+
+How the CLI resolves tokens:
+
+- `GITHUB_TOKEN` and `HF_TOKEN` are read from the environment with individual flags **and** with
+  `--config`. When SIEVE is installed from the repository as described above, a `.env` file in the
+  repository root is loaded into the environment too (`.env.example` shows the format).
+- The environment fills a token only where nothing else set it. A token written in the config file
+  (or given with `--github-token`) therefore takes precedence over the variable. With `--config`, the
+  `--github-token` flag is ignored along with every other flag.
+- Tokens are never written to `manifest.json`, and never appear in the config printed at the start of
+  a run or by `sieve validate-config`, even when the config file contains one. A config file is plain
+  text on disk, so prefer the environment variable.
+- The web UI reads neither variable; paste the GitHub token into the sidebar.
+""")
+
+st.subheader("Parameter Parity Across Interfaces")
+st.markdown("""
+Every setting, with its CLI flag, config-file key and web UI control. Defaults are given as
+CLI and config / web UI. "none" means no cap.
+
+| Parameter | CLI flag | Config key | Web UI control | Default (CLI and config / web UI) |
+|-----------|----------|------------|----------------|-----------------------------------|
+| Language | `--language` | `language` | Programming Language | required / Python |
+| Start date | `--start-date` | `start_date` | Repo Creation Lower Bound | required / 2024-01-01 |
+| End date | `--end-date` | `end_date` | Repo Creation Upper Bound | CLI: 30 days before today; config: required / 30 days before today |
+| Minimum stars | `--min-stars` | `min_stars` | Minimum Stars | 10 / 50 |
+| Minimum contributors | `--min-contributors` | `min_contributors` | Minimum Contributors | 1 / 5 |
+| Max repos | `--max-repos` | `max_repos` | Max Repos (0 = no cap) | none / 20 |
+| Max functions | `--max-functions` | `max_functions` | Max Functions (0 = no cap) | none / 30 |
+| Max classes | `--max-classes` | `max_classes` | Max Classes (0 = no cap) | none / 30 |
+| Granularity | `--granularity function`, `class` or `both` | `granularity` (list) | Extract functions, Extract classes (checkboxes) | both / both |
+| Engineered projects only | `--engineered-only` / `--no-engineered-only` | `engineered_only` | Engineered Projects Only | off / off |
+| Annotate LLM score | `--annotate-llm-score` / `--no-annotate-llm-score` | `annotate_llm_score` | Annotate LLM Score | off / off |
+| Export full AST | `--export-ast` / `--no-export-ast` | `export_ast` | Export Full AST | off / off |
+| Deduplicate | `--deduplicate` / `--no-deduplicate` | `deduplicate` | Deduplicate | off / off |
+| Dedup threshold | `--dedup-threshold` | `dedup_threshold` | Dedup Similarity Threshold (0.5 to 1.0) | 0.8 / 0.8 |
+| Export format | `--export-format` | `export_format` | Export Format | jsonl / jsonl |
+| Output directory | `--output-dir` | `output_dir` | none (temporary directory, Download Corpus buttons) | ./sieve_output / not applicable |
+| GitHub token | `--github-token`, `GITHUB_TOKEN` | `github_token` | GitHub Token (PAT) | none / none |
+| Hugging Face token | `HF_TOKEN` (no flag) | `hf_token` | none | none / none |
+| Wait for rate limit | `--wait-for-rate-limit` / `--no-wait-for-rate-limit` | `wait_for_rate_limit` | none (never waits) | off / off |
+| Config file | `--config` | not applicable | none | none |
+
+`sieve validate-config FILE` checks a config file without running anything. The config file rejects
+unknown keys, so a misspelled key is an error rather than being ignored.
+""")
+
+st.divider()
+
+# ─── Discovery ────────────────────────────────────────────────────────────────
+
+st.header("Repository Discovery")
+st.markdown("""
+SIEVE finds repositories with GitHub's repository search, using the qualifiers `language`,
+`created:START..END`, `stars:>=MIN_STARS`, `fork:false` and `archived:false`, sorted by stars,
+highest first. GitHub returns at most **1,000 results per search query**, however many repositories
+match.
+
+**How results beyond the 1,000-result limit are collected**
+
+- **Max Repos is 1,000 or less:** SIEVE runs one query. The first 1,000 results are the exact top
+  repositories by stars, and repositories that fail the contributor filter are skipped as they come.
+  If all 1,000 results were scanned and fewer than Max Repos passed the filters, SIEVE logs a warning
+  and marks the discovery incomplete, because more matches may exist beyond the limit.
+- **No cap, or Max Repos above 1,000:** SIEVE splits the creation-date range at its midpoint day,
+  recursively, into whole-day windows with no gap and no overlap, until each window holds at most
+  1,000 results. It uses the true total that GitHub reports for each window.
+  - With a cap above 1,000, candidates from every window are collected and ranked by stars (ties by
+    repository name); the first Max Repos that pass the contributor filter are kept, which is the exact
+    top by stars.
+  - With no cap, repositories are taken window by window, **oldest window first**. Stars order holds
+    only within a window.
+- **A single day with more than 1,000 matching repositories** cannot be split further. SIEVE collects
+  that day's 1,000 most-starred repositories, records the day as **truncated**, and marks the
+  discovery incomplete. Nothing is dropped silently.
+
+**Contributor counts**
+
+- The count is exact: SIEVE lists the repository's contributors (100 per page, so
+  `ceil(n / 100)` requests) and does not stop early. Bots (a login ending in `[bot]`, or account type
+  `Bot`) and anonymous email-only contributors are not counted.
+- When GitHub refuses to list the contributors because the list is too large, the count is `null`.
+  The repository is kept (it passes any **Min Contributors** threshold) and its name is listed in
+  `discovery.contributors_unknown`.
+- If the contributors cannot be fetched at all, even after retrying server and connection errors up to
+  three times, the repository is skipped and listed in `discovery.excluded` with the reason. Such a run
+  is marked incomplete.
+
+**The `discovery` block of `manifest.json`**
+
+| Field | Meaning |
+|-------|---------|
+| `complete` | `true` when every matching repository was reachable: no single day exceeded 1,000 results, GitHub did not flag a count as incomplete, no repository was excluded, and no error or rate limit stopped discovery. A **Max Repos** cap does not make a run incomplete. |
+| `total_matching` | Repositories GitHub reports for the filters. For a single-query run (Max Repos 1,000 or less) GitHub is not asked for a total, and this is the number of search results scanned. |
+| `slices` | Number of search queries (windows) run. |
+| `truncated_windows` | Single days that held more than 1,000 repositories, each as `{start, end, total_count}`. Only the 1,000 most-starred of each were collected. |
+| `incomplete_results` | `true` if GitHub flagged a result count as incomplete (its search timed out, so results may be missing). |
+| `excluded` | Repositories dropped because their contributors could not be fetched, each as `{repo, reason}`. |
+| `contributors_unknown` | Repositories kept although GitHub would not list their contributors. |
+| `rate_limit_waits` | `{count, seconds}`: how often the run waited out a rate limit and for how long. Zero unless **Wait for rate limit** is on. |
+
+If a rate limit stops discovery after some repositories were found, the run continues with those,
+`complete` is set to `false`, and the run summary reports `rate_limited` (the CLI prints a warning
+and the web UI shows one).
+""")
+
+st.divider()
+
+# ─── Rate limits ──────────────────────────────────────────────────────────────
+
+st.header("GitHub Rate Limits")
+st.markdown("""
+**What the limits are.** Without a token GitHub allows 60 REST requests per hour and 10 search requests
+per minute; with a token, 5,000 per hour and 30 per minute. Search requests (including the result counts
+used to split date windows) count against the search limit, everything else against the REST limit.
+Per accepted repository discovery spends about `ceil(n / 100)` requests listing its `n` contributors
+plus one for the latest commit, and every scanned repository that is rejected still costs its
+contributor pages. SIEVE plans on about 5 requests per accepted repository, so a run without a token
+covers roughly 12 repositories. Create a classic token with the `public_repo` scope, as SIEVE's own
+error messages ask.
+
+**Default: fail fast.**
+
+- Before any work SIEVE reads the quota (this read costs nothing). If fewer than 10 REST requests
+  remain, the run stops at once with an error giving the reset time.
+- A primary limit that resets within about a minute (the usual case for the search limit) is waited
+  out automatically. One that would take longer raises an error immediately, with the reset time,
+  instead of sleeping for up to an hour. Secondary limits (too many requests too quickly) are retried a
+  few times by the GitHub client, 30 seconds apart, before the run stops.
+- If the limit is hit after some repositories were found, the run continues with them and the results
+  are marked partial. If none were found yet, the run ends with an error (CLI exit code 1).
+
+**`--wait-for-rate-limit`.** The CLI flag (config key `wait_for_rate_limit`) makes the run sleep and
+resume. On a primary limit it sleeps until the reset time plus a 5-second margin, then retries the same
+request. On a secondary limit it sleeps for the `Retry-After` time GitHub sends (60 seconds if absent).
+Paginated listings resume where they stopped, with nothing repeated or skipped. A request gives up
+after 5 waits in a row. Progress lines show the time left. A single wait can last up to an hour,
+`Ctrl+C` stops the run, and nothing is written until the run ends, so stopping loses the run. The
+number of waits and the seconds slept are recorded in `discovery.rate_limit_waits`.
+
+**The web UI never waits.** It always runs with waiting off, because an hour-long sleep would hang the
+hosted Space. A rate limit there ends the run with an error or a partial-results warning.
+
+**Request pacing.** Requests go out back to back while plenty of quota is left. Once the remaining
+quota falls to a tenth of the window (6 of 60, 500 of 5,000), discovery pauses 1 second after each
+repository. The figure comes from the headers of the last response, so it costs no request. There are
+also fixed short pauses: 0.3 seconds between the per-repository lookups of the engineered filter and
+0.2 seconds between repositories during extraction.
+
+**Repositories are processed one after another, not in parallel.**
 """)
 
 st.divider()
@@ -296,8 +568,10 @@ st.divider()
 st.header("Corpus Size Caps & Stratified Sampling")
 st.markdown("""
 When **Max Functions** or **Max Classes** is set, SIEVE does not draw a simple random sample.
-Before extracting, it counts the available records in each repository and splits the cap
-across repositories as follows:
+Before extracting (Pass 1), it counts the available records in each repository. The count is
+**exact**: it covers the same files and the same function and class definitions that extraction
+(Pass 2) will find, so with no caps Pass 1 and Pass 2 give the same numbers (the one gap is listed
+under **Known Limitations**). SIEVE then splits the cap across repositories as follows:
 
 1. Every repository that has at least one record first gets **1 slot**, so small
    repositories are not rounded down to nothing.
@@ -314,9 +588,15 @@ across repositories as follows:
 
 No repository is ever allocated more records than it has, and the allocations add up to the
 cap (or to the total available, if that is smaller). Within a repository, the allocated
-records are the first ones found while walking the repository's files, not a random draw.
-Random sampling without replacement is used only in a final safety-net step, which applies
-if the corpus still exceeds the cap after deduplication.
+records are the first ones found while walking its files in a fixed order (see **What Extraction
+Skips**), not a random draw, so the same repository state gives the same records. Random sampling
+without replacement is used only in a final safety-net step, which applies if the corpus still
+exceeds the cap after deduplication.
+
+**Shortfall (Pass 3).** Pass 2 extracts more than each repository's allocation (twice the cap, at most
+50 more) and keeps the surplus. If a repository yields less than its allocation, the missing records
+are filled first from other repositories' surplus and then, if still short, by cloning repositories
+that have records left. Pass 1 runs only when **Max Functions** or **Max Classes** is set.
 
 **Example:** cap = 20, corpus = TheAlgorithms (276 classes), system-design-primer (52 classes).
 Each repository first gets 1 slot, leaving 18. These are split in proportion to 275 and 51
@@ -327,6 +607,63 @@ final allocation is TheAlgorithms 16, system-design-primer 4.
 If your corpus is dominated by one repository (e.g. a large algorithm collection), the sample
 will reflect that. If you need balanced representation across repos, use the **Engineered Projects**
 filter or set **Max Repos** to a small number of carefully chosen repositories.
+""")
+
+st.divider()
+
+# ─── Extraction rules ─────────────────────────────────────────────────────────
+
+st.header("What Extraction Skips")
+st.markdown("""
+Extraction walks each cloned repository (its default branch HEAD, cloned with `--depth 1`) and
+parses the source files of the selected language.
+
+**File extensions processed**
+
+| Language | Extensions |
+|----------|------------|
+| Python | `.py` |
+| Java | `.java` |
+| JavaScript | `.js`, `.jsx` |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hxx` |
+
+TypeScript (`.ts`, `.tsx`) and the JavaScript module extensions `.mjs` and `.cjs` are **not**
+processed.
+
+**Directories that are skipped.** These names are matched exactly (case-sensitive) on directories at
+any depth below the repository root, and nothing inside them is read:
+`vendor`, `vendored`, `third_party`, `third-party`, `site-packages`, `node_modules`, `dist`, `build`,
+`venv`, `.venv`, `.tox`, `.eggs`. `external` and `env` are **not** skipped, because they are ordinary
+names for real source, and other hidden directories are not skipped as a class. Test directories are
+skipped the same way: `test`, `tests`, `__tests__`, `spec`, `specs`.
+
+**Test files that are skipped.** The rules look at the file name only (never its directories),
+are case-sensitive, and apply to **every language**:
+
+| Rule | Skipped file names |
+|------|--------------------|
+| Name starts with | `test_` or `Test` |
+| Name ends with | `_test.py`, `Test.java`, `.test.js`, `.spec.js`, `.test.ts`, `.spec.ts`, `_test.cpp`, `_test.cc` |
+
+So `test_utils.py`, `TestApp.py`, `Testimonials.js`, `TestX.cpp`, `UserTest.java` and `foo_test.cc` are
+skipped, while `test.py`, `testing.py`, `conftest.py`, `FooTests.java`, `FooIT.java`, `Foo.test.jsx`,
+`foo_test.h` and `foo_test.cxx` are not. This is a name rule, not a detector of test code.
+
+**JavaScript only.** Files ending in `.min.js` and any path containing `node_modules` are skipped by
+name. A file is also skipped as minified or bundled when any line is longer than 1,000 characters
+or the average line is longer than 300 characters.
+
+**Order and counts.** Files are visited in a deterministic order: the files of a directory sorted by
+name, then its subdirectories sorted by name, depth first. Pass 1 (counting) and Pass 2 (extraction) select
+files through the same code and find definitions with the same walk, so the Pass 1 count equals
+what Pass 2 extracts. Forward declarations (a C++ `class X;` with no body) are not counted or
+extracted.
+
+**What the manifest records.** The `extraction` block of `manifest.json` holds `skip_dirs` (the
+sorted list of skipped directory names above) and `files_skipped` (how many source files of the
+selected language sat inside those directories across all processed repositories). Each repository
+entry has its own `extraction_files_skipped`. Files skipped as tests or as minified JavaScript are not counted
+there.
 """)
 
 st.divider()
@@ -413,11 +750,12 @@ with tab_func:
     | `parent_class` | str \\| null | Enclosing class name if `is_method` is true |
     | `decorators` | list[str] | Decorator/annotation strings (e.g. `@staticmethod`, `@Override`) |
     | `commit_sha` | str \\| null | Git commit SHA at extraction time — use to build GitHub permalink |
-    | `llm_score` | float \\| null | P(LLM-generated) from the built-in CodeBERT classifier |
-    | `ast_depth` | int \\| null | Maximum depth of the parse tree |
+    | `llm_score` | float \\| null | P(LLM-generated) from the built-in CodeBERT classifier; null if scoring is off, failed, or the snippet is blank |
+    | `llm_score_truncated` | bool \\| null | True if the score reflects only the first 512 tokens of the snippet; null if not scored |
+    | `ast_depth` | int \\| null | Maximum depth of the parse tree (always exported) |
     | `ast_num_nodes` | int \\| null | Total number of AST nodes |
     | `ast_node_types` | dict \\| null | Node type → count mapping |
-    | `ast` | dict \\| null | Full AST as nested JSON (only when Export AST is enabled) |
+    | `ast` | dict \\| null | Full AST as nested JSON (only when Export Full AST is enabled) |
     | `loc` | int \\| null | Total lines of code |
     | `sloc` | int \\| null | Source lines (non-blank, non-comment) |
     | `lloc` | int \\| null | Logical lines of code (statements) |
@@ -462,11 +800,12 @@ with tab_class:
     | `start_line` | int | Start line in the original file |
     | `end_line` | int | End line in the original file |
     | `commit_sha` | str \\| null | Git commit SHA at extraction time — use to build GitHub permalink |
-    | `llm_score` | float \\| null | P(LLM-generated) from the built-in CodeBERT classifier |
-    | `ast_depth` | int \\| null | Maximum depth of the parse tree |
+    | `llm_score` | float \\| null | P(LLM-generated) from the built-in CodeBERT classifier; null if scoring is off, failed, or the snippet is blank |
+    | `llm_score_truncated` | bool \\| null | True if the score reflects only the first 512 tokens of the snippet; null if not scored |
+    | `ast_depth` | int \\| null | Maximum depth of the parse tree (always exported) |
     | `ast_num_nodes` | int \\| null | Total number of AST nodes |
     | `ast_node_types` | dict \\| null | Node type → count mapping |
-    | `ast` | dict \\| null | Full AST as nested JSON (only when Export AST is enabled) |
+    | `ast` | dict \\| null | Full AST as nested JSON (only when Export Full AST is enabled) |
     | `loc` | int \\| null | Total lines of code |
     | `sloc` | int \\| null | Source lines (non-blank, non-comment) |
     | `lloc` | int \\| null | Logical lines of code (statements) |
@@ -601,7 +940,8 @@ st.divider()
 
 st.header("Output Files")
 st.markdown("""
-All output is written to the directory specified in **Output Directory**. Files produced:
+Output is written to the CLI's `--output-dir` (config key `output_dir`, default `./sieve_output`).
+The web UI writes to a temporary directory and offers the files as downloads. Files produced:
 
 | File | Description |
 |------|-------------|
@@ -609,9 +949,23 @@ All output is written to the directory specified in **Output Directory**. Files 
 | `classes.jsonl` | One JSON object per line, one per class record |
 | `functions.parquet` | Columnar format — list fields serialized as JSON strings |
 | `classes.parquet` | Columnar format — list fields serialized as JSON strings |
-| `manifest.json` | Run metadata: config snapshot, per-repo stats, summary counts, timestamps |
+| `manifest.json` | Run metadata, described below |
 
-JSONL and Parquet are written based on the **Export Format** setting. The manifest is always written.
+JSONL and Parquet are written based on the **Export Format** setting. A data file is written only when
+it has records. The manifest is always written.
+
+**`manifest.json`** contains:
+
+| Key | Content |
+|-----|---------|
+| `sieve_version`, `generated_at` | SIEVE version and the UTC time the manifest was written |
+| `config` | The run's settings. **Tokens are never included.** |
+| `summary` | `total_repos`, `total_functions`, `total_classes`, `total_llm_scored` (records that received an `llm_score`) and `total_llm_score_truncated` (those scored on only their first 512 tokens) |
+| `repos` | One entry per processed repository: stars, contributors (`null` if GitHub would not count them), last commit date, default branch, license, topics, `collected_at`, `test_suite`, `dependencies`, `extraction_files_skipped`, and `quality` when the engineered filter ran |
+| `discovery` | What the repository search covered; see **Repository Discovery** |
+| `extraction` | The skipped directory names and the number of files skipped; see **What Extraction Skips** |
+
+Each record's `commit_sha` is the commit that was cloned (`null` if it could not be read).
 
 **Loading the data in Python:**
 ```python
@@ -704,19 +1058,13 @@ with st.expander("Why does the line number say 'body lines, excl. imports'?"):
 
 with st.expander("What GitHub API rate limits should I expect?"):
     st.markdown("""
-    Without a token: 10 requests/minute (search) and 60 requests/hour (REST).
-    This will be exhausted quickly for any non-trivial run.
+    Without a token: 10 search requests per minute and 60 REST requests per hour, which is enough
+    for roughly 12 repositories. With a token: 30 per minute and 5,000 per hour. Create a classic
+    token with the `public_repo` scope.
 
-    With a Personal Access Token (PAT): 30 requests/minute (search) and 5,000 requests/hour
-    (REST). A PAT with no scopes (public repo access only) is sufficient — SIEVE only reads
-    public repository data.
-
-    SIEVE sleeps 0.5 seconds between contributor count fetches and 0.2 seconds between
-    per-repo processing to stay within limits. For large runs (50+ repos), expect the
-    discovery phase to take several minutes.
-
-    To create a PAT: GitHub → Settings → Developer settings → Personal access tokens →
-    Tokens (classic) → Generate new token → no scopes required → copy into the token field.
+    By default a limit that will not clear within about a minute stops the run with an error; the
+    CLI's `--wait-for-rate-limit` makes it wait and resume, and the web UI never waits. Requests are
+    paced down once the remaining quota is low. See **GitHub Rate Limits** above for the details.
     """)
 
 with st.expander("Which languages are supported?"):
@@ -734,10 +1082,10 @@ with st.expander("Which languages are supported?"):
 
     **JavaScript** extracts `function_declaration`, `method_definition`, `class_declaration`,
     and arrow functions assigned to `const`/`let`/`var`. Handles default imports, named
-    imports, and namespace imports (`import * as`). Minified and bundled files are
-    automatically skipped. TypeScript (`.ts`, `.tsx`) files are processed using the
-    JavaScript grammar — type annotations are preserved in parameter strings but not
-    separately parsed.
+    imports, and namespace imports (`import * as`). Only `.js` and `.jsx` files are
+    processed; minified and bundled files are skipped. **TypeScript is not supported**:
+    `.ts` and `.tsx` files are not processed, because SIEVE ships only the JavaScript grammar
+    and it mis-parses typed parameters.
 
     **C++** extracts free functions and class methods, including pointer/reference return
     types, template functions, namespace-qualified names, and qualified method names
@@ -765,8 +1113,20 @@ with st.expander("What is the LLM Score field?"):
     produced by a fine-tuned [CodeBERT](https://huggingface.co/microsoft/codebert-base)
     classifier integrated directly into SIEVE.
 
-    Enable it via the **Annotate LLM Score** toggle before running. The classifier weights
-    (~500MB) are downloaded automatically from HuggingFace Hub on first use.
+    Enable it via the **Annotate LLM Score** toggle (CLI `--annotate-llm-score`) before running.
+    The classifier weights (~500MB) are downloaded automatically from HuggingFace Hub on first use.
+
+    **Truncation.** The model reads at most 512 tokens (counting the start and end tokens). A longer
+    snippet is scored on its first 512 tokens only, and its `llm_score_truncated` field is `true`.
+    The run summary reports `total_llm_scored` and `total_llm_score_truncated`, and the web UI notes how
+    many scored records were truncated.
+
+    **Batching.** Snippets are sorted by token length (longest first) and scored in batches of up to 64,
+    each padded only to its own longest member instead of to 512. Padding is masked, so this changes
+    speed, not the scores. Results are returned in the original order.
+
+    **Blank snippets and failures.** A blank snippet gets `llm_score` null. If the classifier cannot be
+    loaded or fails, the run continues and the scores stay null.
 
     See the **About the Classifier** page for full details on training data, architecture,
     and performance metrics (F1=0.9478, AUROC=0.9902 on a held-out test set of 11,419
@@ -860,14 +1220,25 @@ st.header("How Test Suite Detection Works")
 st.markdown("""
 SIEVE automatically detects whether a repository has a test suite using a
 **four-signal heuristic**. Each signal that fires contributes one point; a
-repo is considered to have a test suite if **≥ 2 signals** fire.
+repo is considered to have a test suite if **≥ 2 signals** fire. The confidence is
+`high` for 3 or 4 signals, `medium` for 2, `low` for 1 and `none` for 0.
+
+This detection is separate from the test-file rules that extraction uses to leave test files out of
+the corpus (see **What Extraction Skips**). It walks the repository itself, so its rules and its list
+of ignored directories differ.
 
 | Signal | What SIEVE checks |
 |---|---|
-| **Test directory** | A directory at any depth whose name (case-insensitive) is e.g. `test`, `tests`, `__tests__`, `spec`, `specs`, `testing`, `e2e` or `unit_tests`. Hidden directories other than `.github`, and `node_modules`, `__pycache__`, `venv` and `env`, are not searched. |
-| **Test file naming** | Patterns for the selected language. Python: `test_*.py`, `*_test.py`. Java: `*Test.java`, `*Tests.java`, `*TestCase.java`, `*IT.java`. JavaScript: `*.test.js`, `*.spec.js`, `*.test.ts`, `*.spec.ts`. C++: `test_*`, `*_test`, `*Test` or `*test`, and `*Spec` or `*spec`, with a `.cpp`, `.cc` or `.cxx` extension. |
-| **Test runner config** | Config files for the selected language. Python: `pytest.ini`, `.pytest.ini`, `tox.ini`, `setup.cfg`, `pyproject.toml`. Java: `pom.xml`, `build.gradle`, `build.gradle.kts`. JavaScript: e.g. `jest.config.js`, `karma.conf.js`, `.mocharc.js`. C++: e.g. `CMakeLists.txt`, `Makefile`, `meson.build`. For `pyproject.toml`, `setup.cfg`, `pom.xml` and `build.gradle`, the file counts only if its text contains `pytest`, `unittest`, `testng`, `junit` or `jest` (substring match). Every other listed file counts by presence alone, so a `CMakeLists.txt` or `Makefile` triggers this signal even if it defines no tests. |
-| **CI workflow** | `.yml` or `.yaml` files under `.github` whose text (case-insensitive) contains a test-runner keyword, e.g. `pytest`, `unittest`, `jest`, `mocha`, `mvn test`, `gradle test`, `npm test`, `ctest`, `gtest` or `run tests`. The keyword list is the same for all languages. Other CI systems, such as `.circleci`, are not scanned. |
+| **Test directory** | A directory (case-insensitive name) among `test`, `tests`, `test_suite`, `testing`, `__tests__`, `__test__`, `spec`, `specs`, `unit_tests`, `integration_tests`, `functional_tests` and `e2e`, **that contains at least one test file** (at any depth below it). An empty folder, or one holding only data or fixtures, does not count. |
+| **Test file naming** | Patterns for the selected language. Python: `test_*.py`, `*_test.py`. Java: `*Test.java`, `*Tests.java`, `*TestCase.java`, `*IT.java`. JavaScript: `*.test.js`, `*.spec.js`, `*.test.ts`, `*.spec.ts`. C++: `test_*`, `*_test`, `*Test` or `*test`, and `*Spec` or `*spec`, with a `.cpp`, `.cc` or `.cxx` extension. In addition, any source file inside a `__tests__` or `__test__` directory counts as a test file (Jest keeps plain `foo.js` files there). |
+| **Test runner config** | Config files for the selected language. Python: `conftest.py` (by presence), and `pyproject.toml`, `pytest.ini`, `.pytest.ini`, `setup.cfg`, `tox.ini` only when they hold real pytest configuration: a `[tool.pytest]` or `[tool.pytest.ini_options]` table in `pyproject.toml`, a `[pytest]` or `[tool:pytest]` section in the others. A bare mention of `pytest`, for example as a dev dependency, does not count. Java: `pom.xml` or `build.gradle` whose text contains `pytest`, `unittest`, `testng`, `junit` or `jest` (substring match), and `build.gradle.kts` by presence. JavaScript: e.g. `jest.config.js`, `karma.conf.js`, `.mocharc.js`, by presence. C++: `CMakeLists.txt`, `CTestTestfile.cmake`, `googletest.cmake`, `Makefile`, `meson.build`, by presence, so a `CMakeLists.txt` or `Makefile` triggers this signal even if it defines no tests. |
+| **CI workflow** | `.yml` or `.yaml` files under `.github` whose text (case-insensitive) contains a test-runner keyword, e.g. `pytest`, `unittest`, `tox`, `jest`, `mocha`, `mvn test`, `gradle test`, `npm test`, `ctest`, `gtest` or `run tests`. The keyword list is the same for all languages. Other CI systems, such as `.circleci`, are not scanned. |
+
+Detection does not enter these directories: `.git`, `venv`, `.venv`, `env`, `node_modules`,
+`__pycache__`, `site-packages`, `vendor`, `vendored`, `third_party`, `third-party`, `external`, `build`,
+`dist`, `.tox`, `.eggs`, `.mypy_cache`, `.pytest_cache`, nor any other hidden directory except `.github`.
+Tests that live in vendored, generated or virtualenv code belong to someone else's project and
+do not count.
 
 The two-signal threshold avoids false positives from repos that have a single
 test file but no real test infrastructure, while still catching repos that use
@@ -875,6 +1246,49 @@ non-standard directory layouts.
 
 The result is reported as repository metadata (the `test_suite` field). It is not
 used by the **Engineered Projects** filter.
+""")
+
+st.divider()
+
+# ─── Known limitations ───────────────────────────────────────────────────────
+
+st.header("Known Limitations")
+st.markdown("""
+**Creation date is not code age.** The date filter uses the repository's GitHub creation date
+(`created:`). A repository whose history was imported, for example pushed from an older repository, can
+contain commits that predate its GitHub creation date. A creation-date bound therefore says when the
+repository appeared on GitHub, not how old its code is. SIEVE does not inspect commit dates or the
+origin of individual snippets.
+
+**There is no snapshot date.** Results depend on when the run happens: SIEVE searches GitHub live and
+clones the default branch HEAD at that moment. Star counts, contributor counts and the branch content
+change over time, so two runs with the same settings on different days can differ. A repository is
+cloned separately for Pass 1, Pass 2 and any shortfall top-up, so a repository pushed to between those
+clones can change under the run. The manifest records `generated_at`, a `collected_at` timestamp and the
+star count per repository, and the cloned `commit_sha` on each record. It does not pin a snapshot you
+could re-fetch later.
+
+**Skipped directories.** `build` and `dist` are skipped along with the other names listed under
+**What Extraction Skips**; `external` and `env` are not.
+
+**The test-name rules are not language-specific.** A file name that starts with `Test` is dropped in
+every language, so `Testimonials.js` and `TestApp.py` are dropped along with real tests. File names such
+as `FooTests.java`, `FooIT.java`, `Foo.test.jsx` and `foo_test.h` are not treated as tests and stay in
+the corpus. Test directories are matched by exact name (`test`, `tests`, `__tests__`, `spec`, `specs`).
+
+**One narrow Pass 1 / Pass 2 gap.** Pass 1 counts exactly what Pass 2 extracts, with one exception: a
+file that parses but then fails while its records are built is counted in Pass 1 and dropped in Pass 2.
+The same applies if the repository changed between the two clones.
+
+**Capped corpora can differ between versions.** Per-repository caps come from the Pass 1 counts, so
+with caps set, versions whose counts or discovery differ can allocate the caps differently.
+
+**Processing is sequential.** Repositories are cloned and extracted one after another, so large runs
+are slow. The public Space has 8 GB of RAM; run large corpora locally.
+
+**C++ is slower.** See **C++ Parsing Performance**.
+
+**Languages.** Python, Java, JavaScript (`.js`, `.jsx`) and C++ only. TypeScript is not processed.
 """)
 
 st.divider()
@@ -914,4 +1328,4 @@ The full license is also available in the
 """)
 
 st.divider()
-st.caption("SIEVE v0.1.0 · Built for SE research · [GitHub](https://github.com/mrsumitbd/sieve)")
+st.caption(f"SIEVE v{__version__} · Built for SE research · [GitHub](https://github.com/mrsumitbd/sieve)")
