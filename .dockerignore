@@ -1,0 +1,2 @@
+# Supplementary materials are not needed to run the app (the Dockerfile does COPY . .)
+supplementary_materials/
