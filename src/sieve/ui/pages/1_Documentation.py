@@ -136,7 +136,7 @@ This is not hypothetical. Research has shown:
 1. **For code generation:** LLMs achieve 84–89% correctness on widely-used synthetic
    benchmarks (e.g. HumanEval, MBPP) but only **25–34%** on real-world class-level
    code generation tasks drawn from open-source repositories
-   *(Rahman et al., "Beyond Synthetic Benchmarks", arXiv:2510.26130, under review at EMSE)*.
+   *(Rahman et al., "Beyond Synthetic Benchmarks", arXiv:2510.26130)*.
    The synthetic benchmarks are closed, well-known, and likely represented in training
    data — producing optimistic results that do not reflect real-world capability.
 

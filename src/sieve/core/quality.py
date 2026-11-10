@@ -46,47 +46,6 @@ from sieve.core.github_limits import RateLimitWaiter, fail_fast_retry
 logger = logging.getLogger(__name__)
 
 
-# ─── cloc availability ────────────────────────────────────────────────────────
-
-CLOC_INSTALL_INSTRUCTIONS = """
-cloc (Count Lines of Code) is not installed or not on your PATH.
-cloc is highly recommended for accurate LOC and comment counting across
-all languages. Without it, SIEVE falls back to an AST-based counter
-(Python: tokenize, Java/JavaScript: tree-sitter) which is accurate but
-slower on large repositories.
-
-Install cloc:
-  macOS:    brew install cloc
-  Ubuntu:   sudo apt install cloc
-  Windows:  choco install cloc       (Chocolatey)
-            winget install AlDanial.Cloc
-  pip:      pip install cloc          (cross-platform wrapper)
-  Manual:   https://github.com/AlDanial/cloc/releases
-""".strip()
-
-
-def check_cloc() -> bool:
-    """
-    Check whether cloc is available on PATH.
-    Logs a clear warning with installation instructions if not found.
-    Returns True if cloc is available, False otherwise.
-    """
-    try:
-        result = subprocess.run(
-            ["cloc", "--version"],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0:
-            version = result.stdout.strip().splitlines()[0]
-            logger.info(f"cloc found: {version}")
-            return True
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    logger.warning(f"\n{'='*60}\n{CLOC_INSTALL_INSTRUCTIONS}\n{'='*60}")
-    return False
-
-
 # ─── Non-software licenses to exclude (Xiao et al.) ──────────────────────────
 
 EXCLUDED_LICENSE_SPDX = {

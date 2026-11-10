@@ -135,50 +135,6 @@ class TestApplyFilters:
         assert m.passes_all is False
 
 
-# ─── check_cloc ───────────────────────────────────────────────────────────────
-
-class TestCheckCloc:
-    def test_returns_true_when_cloc_available(self):
-        from unittest.mock import patch, MagicMock
-        from sieve.core.quality import check_cloc
-
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "v1.94\n"
-
-        with patch("sieve.core.quality.subprocess.run", return_value=mock_result):
-            assert check_cloc() is True
-
-    def test_returns_false_when_cloc_not_found(self):
-        from unittest.mock import patch
-        from sieve.core.quality import check_cloc
-        import subprocess
-
-        with patch("sieve.core.quality.subprocess.run",
-                   side_effect=FileNotFoundError("cloc not found")):
-            assert check_cloc() is False
-
-    def test_returns_false_when_cloc_times_out(self):
-        from unittest.mock import patch
-        from sieve.core.quality import check_cloc
-        import subprocess
-
-        with patch("sieve.core.quality.subprocess.run",
-                   side_effect=subprocess.TimeoutExpired("cloc", 5)):
-            assert check_cloc() is False
-
-    def test_returns_false_when_cloc_nonzero_exit(self):
-        from unittest.mock import patch, MagicMock
-        from sieve.core.quality import check_cloc
-
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-
-        with patch("sieve.core.quality.subprocess.run", return_value=mock_result):
-            assert check_cloc() is False
-
-
 # ─── _count_loc_cloc ─────────────────────────────────────────────────────────
 
 class TestCountLocCloc:

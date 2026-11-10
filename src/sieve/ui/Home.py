@@ -32,7 +32,6 @@ from sieve.core.github_limits import (
     partial_results_message,
 )
 from sieve.pipeline import run_pipeline
-from sieve.core.quality import check_cloc, CLOC_INSTALL_INSTRUCTIONS
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -174,12 +173,6 @@ with st.sidebar:
         ),
     )
 
-    if engineered_only and not check_cloc():
-        st.warning(
-            "**cloc not found.** SIEVE will use its built-in AST-based line "
-            "counter instead. Installing cloc is optional.",
-            icon="⚠️",
-        )
     annotate_llm_score = st.toggle(
         "Annotate LLM Score", value=False,
         help=(

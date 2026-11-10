@@ -49,7 +49,7 @@ with st.expander("What is data contamination and why does it matter?"):
     - **For code generation:** LLMs achieve 84–89% correctness on widely-used
       synthetic benchmarks (e.g. HumanEval), but only **25–34%** on real-world
       class-level tasks drawn from open-source repositories
-      *(Rahman et al., arXiv:2510.26130, under review at EMSE)*.
+      *(Rahman et al., arXiv:2510.26130)*.
       The gap exists because synthetic benchmarks are fixed, well-known, and
       likely seen during training.
 
