@@ -27,8 +27,9 @@ Scoring is Phase 5 of `sieve/pipeline.py` and runs only when
 non-fatal: the error is reported through the progress callback and the run
 continues. `llm_score` is `null` when annotation is off or failed.
 
-`hf_token` is optional and is set only through the config or API (there is no
-CLI option for it).
+`hf_token` is optional. It can be set in the config file or through the API, and
+the CLI reads it from the `HF_TOKEN` environment variable when the config does
+not set it (there is no `--hf-token` flag). The web UI does not read it.
 
 ## Dependencies
 
